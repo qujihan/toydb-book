@@ -2,7 +2,11 @@
 
 #show: book.with(info: (
   name: "Quhaha",
-  title: "toydb源码以及数据库学习",
+  title: "从零开始的数据库生活 \n (From Zero to Database)",
 ))
 
 #include "src/chapter1.typ"
+#include "src/chapter2.typ"
+#include "src/chapter3.typ"
+#include "src/chapter4.typ"
+#include "src/chapter5.typ"
