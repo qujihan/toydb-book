@@ -1,0 +1,3 @@
+[submodule "typst-book-template"]
+	path = typst-book-template
+	url = https://github.com/qujihan/typst-book-template.git
