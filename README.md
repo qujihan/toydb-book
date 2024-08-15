@@ -1,4 +1,4 @@
-# 从零开始的数据库生活(ToyDB走读笔记)
+# 从零开始的分布式数据库生活(ToyDB走读笔记)
 
 > [ToyDB](https://github.com/erikgrinaker/toydb) 仓库
 
