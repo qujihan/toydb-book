@@ -9,110 +9,68 @@ ToyDB使用一个可替换的key/value存储引擎, 通过storage_sql和storage_
 
 在ToyDB中, 存储引擎可以将任意的key/value作为字节切片(byte slice)存储起来, 另外还需要实现`storage::Engine`这个trait.
 
-#let block = "一个key/value的存储引擎可以存储任意的byte strings, 其中key是以字母序排列的.
-有序的key可以高效的进行范围查询, 这个在一些场景还是非常有用的, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀).
-所有的key都应该使用 `KeyCode` 进行编码.
-另外在在写入后, 只有调用 flush() 之后才能保证数据持久化.
+#let block = "
 "
-#referenceBlock(block)
+
+#reference-block("一个key/value的存储引擎可以存储任意的byte strings, 其中key是以字母序排列的.
+有序的key可以高效的进行范围查询, 这个在一些场景还是非常有用的, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀).
+所有的key都应该使用KeyCode进行编码.
+另外在在写入后, 只有调用flush()之后才能保证数据持久化.
+")
 
 #code(
   "toydb/src/storage/engine.rs",
   "strong::Engine",
   ```rust
-pub trait Engine: Send {
-    // scan()返回的迭代器
-    type ScanIterator<'a>: ScanIterator + 'a
-    where
-        Self: Sized + 'a; // 为了对象安全, 忽略// omit in trait objects, for object safety
+  pub trait Engine: Send {
+      // scan()返回的迭代器
+      type ScanIterator<'a>: ScanIterator + 'a
+      where
+          Self: Sized + 'a; // 为了对象安全, 忽略// omit in trait objects, for object safety
 
-    /// Deletes a key, or does nothing if it does not exist.
-    fn delete(&mut self, key: &[u8]) -> Result<()>;
+      /// Deletes a key, or does nothing if it does not exist.
+      fn delete(&mut self, key: &[u8]) -> Result<()>;
 
-    /// Flushes any buffered data to the underlying storage medium.
-    fn flush(&mut self) -> Result<()>;
+      /// Flushes any buffered data to the underlying storage medium.
+      fn flush(&mut self) -> Result<()>;
 
-    /// Gets a value for a key, if it exists.
-    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>>;
+      /// Gets a value for a key, if it exists.
+      fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>>;
 
-    /// Iterates over an ordered range of key/value pairs.
-    fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<'_>
-    where
-        Self: Sized; // omit in trait objects, for object safety
+      /// Iterates over an ordered range of key/value pairs.
+      fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<'_>
+      where
+          Self: Sized; // omit in trait objects, for object safety
 
-    /// Like scan, but can be used from trait objects. The iterator will use
-    /// dynamic dispatch, which has a minor performance penalty.
-    fn scan_dyn(
-        &mut self,
-        range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
-    ) -> Box<dyn ScanIterator + '_>;
+      /// Like scan, but can be used from trait objects. The iterator will use
+      /// dynamic dispatch, which has a minor performance penalty.
+      fn scan_dyn(
+          &mut self,
+          range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
+      ) -> Box<dyn ScanIterator + '_>;
 
-    /// Iterates over all key/value pairs starting with prefix.
-    fn scan_prefix(&mut self, prefix: &[u8]) -> Self::ScanIterator<'_>
-    where
-        Self: Sized, // omit in trait objects, for object safety
-    {
-        self.scan(keycode::prefix_range(prefix))
-    }
+      /// Iterates over all key/value pairs starting with prefix.
+      fn scan_prefix(&mut self, prefix: &[u8]) -> Self::ScanIterator<'_>
+      where
+          Self: Sized, // omit in trait objects, for object safety
+      {
+          self.scan(keycode::prefix_range(prefix))
+      }
 
-    /// Sets a value for a key, replacing the existing value if any.
-    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()>;
+      /// Sets a value for a key, replacing the existing value if any.
+      fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()>;
 
-    /// Returns engine status.
-    fn status(&mut self) -> Result<Status>;
-}
-
-
-
-
-/// A key/value storage engine, where both keys and values are arbitrary byte
-/// strings between 0 B and 2 GB, stored in lexicographical key order. Writes
-/// are only guaranteed durable after calling flush().
-/// 一个 key/value 的存储引擎. 其中 keys 以及 values 可以存大小在 0B~2GB 的 bytes.
-/// 其中存放的顺序是字母序. 只有在调用 flush() 以后才可以保证写入的持久化.
-///
-/// Only supports single-threaded use since all methods (including reads) take a
-/// mutable reference -- serialized access can't be avoided anyway, since both
-/// Raft execution and file access is serial.
-/// 这里仅支持单线程, 即使是 reads. 因为他们都需要一个可变引用. 因为Raft的执行和文件访问都是
-/// 串行的, 无论如何都无法避免序列化.
-pub trait Engine: std::fmt::Display + Send + Sync {
-    /// The iterator returned by scan(). Traits can't return "impl Trait", and
-    /// we don't want to use trait objects, so the type must be specified.
-    /// scan() 返回的迭代器. Traits 不能返回一个 "impl Trait", 并且我们也不想使用 trait 对象
-    /// 所以我们在这里必须指定一个类型.
-    type ScanIterator<'a>: DoubleEndedIterator<Item = Result<(Vec<u8>, Vec<u8>)>> + 'a
-    where
-        Self: 'a;
-
-    /// Deletes a key, or does nothing if it does not exist.
-    /// 删除一个 key. 当这个 key不存在的时候就什么都不做.
-    fn delete(&mut self, key: &[u8]) -> Result<()>;
-
-    /// Flushes any buffered data to the underlying storage medium.
-    // 将缓冲区的数据写入到底层的存储介质中.
-    fn flush(&mut self) -> Result<()>;
-
-    /// Gets a value for a key, if it exists.
-    /// 得到 key 所对应的 value, 如果存在的话.
-    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>>;
-
-    /// Iterates over an ordered range of key/value pairs.
-    /// 遍历指定范围内的 key/value 对.
-    fn scan<R: std::ops::RangeBounds<Vec<u8>>>(&mut self, range: R) -> Self::ScanIterator<'_>;
-
-    /// Sets a value for a key, replacing the existing value if any.
-    // 将 key 设置能 value, 如果存在就替换掉.
-    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()>;
-}
-  ```
+      /// Returns engine status.
+      fn status(&mut self) -> Result<Status>;
+  }
+  ```,
 )
 
-其中的`get`, `set`以及`delete`只是简单的读取以及写入key/value对, 并且通过`flush`可以确保将缓冲区的内容写出到存储介质中(比如通过`fsync`这个系统调用). `scan`按照顺序迭代指定的key/value对范围. 这个对一些高级功能(比如:SQL表扫描)至关重要. 并且暗含了以下一些语义: 
-- 为了提高性能, 存储的数据应该是有序的. 
+其中的`get`, `set`以及`delete`只是简单的读取以及写入key/value对, 并且通过`flush`可以确保将缓冲区的内容写出到存储介质中(比如通过`fsync`这个系统调用). `scan`按照顺序迭代指定的key/value对范围. 这个对一些高级功能(比如:SQL表扫描)至关重要. 并且暗含了以下一些语义:
+- 为了提高性能, 存储的数据应该是有序的.
 - key应该保留字节编码, 这样才能实现范围扫描.
 
-对于存储引擎而已, 并不关心`key`是什么, 但是为了方便上层的调用, 提供了一个称为`KeyCode`的order-preserving#footnote("TODO")编码. 
+对于存储引擎而已, 并不关心`key`是什么, 但是为了方便上层的调用, 提供了一个称为`KeyCode`的order-preserving#footnote("TODO")编码.
 
 // TODO 没看懂这里啥玩意这是
 
@@ -125,7 +83,7 @@ ToyDB使用的存储引擎是BitCask#footnote("https://riak.com/assets/bitcask-i
 + ToyDB没有使用任何压缩, 比如可变长度的整数.
 
 == MVCC事务
-MVCC (Multi-Version Concurrency Control)#footnote("TODO") (多版本并发控制)是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("TODO"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据. 
+MVCC (Multi-Version Concurrency Control)#footnote("TODO") (多版本并发控制)是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("TODO"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
 
 ToyDB在存储层实现了MVCC, 可以使用任何实现了`storage::Engine`这个trait的存储引擎. 使用`begin`开始一个新的事务, 这个事务提供常见的kv操作, 比如 `get`, `set`, `delete`等. 事务可以通过`commit`提交(保留更改且对其他事务可见), 也可以通过`rollback`回滚(丢弃修改).
 
