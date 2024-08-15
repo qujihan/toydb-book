@@ -9,10 +9,62 @@ ToyDB使用一个可替换的key/value存储引擎, 通过storage_sql和storage_
 
 在ToyDB中, 存储引擎可以将任意的key/value作为字节切片(byte slice)存储起来, 另外还需要实现`storage::Engine`这个trait.
 
+#let block = "一个key/value的存储引擎可以存储任意的byte strings, 其中key是以字母序排列的.
+有序的key可以高效的进行范围查询, 这个在一些场景还是非常有用的, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀).
+所有的key都应该使用 `KeyCode` 进行编码.
+另外在在写入后, 只有调用 flush() 之后才能保证数据持久化.
+"
+#referenceBlock(block)
+
 #code(
   "toydb/src/storage/engine.rs",
   "strong::Engine",
   ```rust
+pub trait Engine: Send {
+    // scan()返回的迭代器
+    type ScanIterator<'a>: ScanIterator + 'a
+    where
+        Self: Sized + 'a; // 为了对象安全, 忽略// omit in trait objects, for object safety
+
+    /// Deletes a key, or does nothing if it does not exist.
+    fn delete(&mut self, key: &[u8]) -> Result<()>;
+
+    /// Flushes any buffered data to the underlying storage medium.
+    fn flush(&mut self) -> Result<()>;
+
+    /// Gets a value for a key, if it exists.
+    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>>;
+
+    /// Iterates over an ordered range of key/value pairs.
+    fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<'_>
+    where
+        Self: Sized; // omit in trait objects, for object safety
+
+    /// Like scan, but can be used from trait objects. The iterator will use
+    /// dynamic dispatch, which has a minor performance penalty.
+    fn scan_dyn(
+        &mut self,
+        range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
+    ) -> Box<dyn ScanIterator + '_>;
+
+    /// Iterates over all key/value pairs starting with prefix.
+    fn scan_prefix(&mut self, prefix: &[u8]) -> Self::ScanIterator<'_>
+    where
+        Self: Sized, // omit in trait objects, for object safety
+    {
+        self.scan(keycode::prefix_range(prefix))
+    }
+
+    /// Sets a value for a key, replacing the existing value if any.
+    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()>;
+
+    /// Returns engine status.
+    fn status(&mut self) -> Result<Status>;
+}
+
+
+
+
 /// A key/value storage engine, where both keys and values are arbitrary byte
 /// strings between 0 B and 2 GB, stored in lexicographical key order. Writes
 /// are only guaranteed durable after calling flush().
@@ -65,7 +117,7 @@ pub trait Engine: std::fmt::Display + Send + Sync {
 // TODO 没看懂这里啥玩意这是
 
 
-ToyDB使用的存储引擎是BitCask#footnote("TODO")的变种, 在写入的时候, 先写入到log文件中, 索引会在内存中维护key与文件位置的关系. 当垃圾量(包含替换以及删除的key)大于20%的时候, 将在内存中的key写入到新的log文件中, 替换掉老的log文件.
+ToyDB使用的存储引擎是BitCask#footnote("https://riak.com/assets/bitcask-intro.pdf")的变种, 在写入的时候, 先写入到log文件中, 索引会在内存中维护key与文件位置的关系. 当垃圾量(包含替换以及删除的key)大于20%的时候, 将在内存中的key写入到新的log文件中, 替换掉老的log文件.
 
 === key/value中实现的取舍
 + BitCask需要key的集合在内存中, 而且启动的时候需要扫描log文件来构建索引.
@@ -93,3 +145,6 @@ key/value保存为`Key::Version(key, version)`的形式, 其中`key`是用户提
 为了实现时间穿梭查询, 只读事务只需加载过去事务的`Key::TxnActiveShapshot`记录就可以了, 可见性规则和普通事务是一样的.
 
 === MVCC中的取舍
++ 只是实现了快照隔离级别, 并没有实现可序列化隔离级别. 会导致写倾斜(write skew)问题#footnote("https://justinjaffray.com/what-does-write-skew-look-like/").
++ 旧的MVCC版本永远不会被删除, 会导致存储空间的浪费.但是这简化了实现, 也允许完整的数据历史记录.
++ 事务id会在64位后溢出, 没有做处理

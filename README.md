@@ -1,8 +1,10 @@
-# 从零开始的数据库生活(toyDB走读笔记)
+# 从零开始的数据库生活(ToyDB走读笔记)
 
-> [toyDB](https://github.com/erikgrinaker/toydb) 仓库
+> [ToyDB](https://github.com/erikgrinaker/toydb) 仓库
 
 # 编译本书
+
+所需组件
 - python(以及tqdm模块)
 - typst
 - typstyle(格式化typ代码所需)
