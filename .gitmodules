@@ -1,3 +1,6 @@
 [submodule "typst-book-template"]
 	path = typst-book-template
 	url = https://github.com/qujihan/typst-book-template.git
+[submodule "fonts"]
+	path = fonts
+	url = https://github.com/qujihan/fonts.git

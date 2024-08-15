@@ -1,0 +1,21 @@
+name: Generate PDF
+on: push
+jobs:
+  render_pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: typst-community/setup-typst@v3
+      - name: download typst-book-template
+        run: |
+          git submodule update --init --recursive
+          pip install requests
+          pip install tqdm
+          make font
+          make c
+      - uses: actions/upload-artifact@v4
+        id: artifact-upload-step
+        with:
+          name: from_zero_to_distributed_database.pdf
+          path: 从零开始的分布式数据库生活.pdf
+      - run:  echo 'Artifact URL is ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.artifact-upload-step.outputs.artifact-id }}'

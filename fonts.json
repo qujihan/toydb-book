@@ -1,0 +1,11 @@
+{
+    "lora": [
+        "https://github.com/cyrealtype/Lora-Cyrillic/releases/download/v3.005/Lora-v3.005.zip"
+    ],
+    "CaskaydiaCove Nerd Font": [
+        "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/CascadiaCode.zip"
+    ],
+    "Han-serif": [
+        "https://github.com/adobe-fonts/source-han-serif/releases/download/2.002R/09_SourceHanSerifSC.zip"
+    ]
+}
