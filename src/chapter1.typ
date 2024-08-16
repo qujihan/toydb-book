@@ -6,6 +6,3 @@
 == ToyDB的整体架构
 
 #pic(path-prefix + "architecture.svg", "ToyDB的整体架构")
-
-
-

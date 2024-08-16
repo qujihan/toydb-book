@@ -1,6 +1,21 @@
 #import "../typst-book-template/book.typ": *
 = 存储引擎
 
+#code(
+  "tree src/storage",
+  "存储引擎的代码结构",
+  ```zsh
+  src/storage
+  ├── bitcask.rs # 基于BitCask实现的存储引擎
+  ├── engine.rs  # 存储引擎的trait
+  ├── memory.rs  # 基于标准库中的BTree实现的存储引擎
+  ├── mod.rs
+  ├── mvcc.rs    # 在存储引擎之上实现MVCC事务
+  └── testscripts
+      └── ....   # 测试文件
+  ```,
+)
+
 ToyDB使用一个可替换的key/value存储引擎, 通过storage_sql和storage_raft选项分别配置SQL和Raft存储引擎. 关于更高层的SQL存储引擎将在SQL部分单独讨论.
 
 == 二进制编码
@@ -12,55 +27,50 @@ ToyDB使用一个可替换的key/value存储引擎, 通过storage_sql和storage_
 #let block = "
 "
 
-#reference-block("一个key/value的存储引擎可以存储任意的byte strings, 其中key是以字母序排列的.
-有序的key可以高效的进行范围查询, 这个在一些场景还是非常有用的, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀).
-所有的key都应该使用KeyCode进行编码.
-另外在在写入后, 只有调用flush()之后才能保证数据持久化.
+#reference-block("一个key/value的存储引擎以字母序存储字节序列.
+其中key都是有序的, 这样就可以高效的进行范围查询, 这个在一些场景还是非常有用的, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀).
+另外key都应该使用KeyCode进行编码.
+在写入后, 只有调用flush()之后才能保证数据持久化.
+
+在toydb中, 即使是读操作, 也只支持单线程, 这是因为所有方法都包含一个存储引擎的可变引用.
+无论是raft的日志运用到状态机还是对文件的读取操作, 都是只能顺序访问的.
 ")
 
 #code(
   "toydb/src/storage/engine.rs",
   "strong::Engine",
   ```rust
+  /// 带有 Self: Sized 是为了无法使用trait object(比如Box<dyn Engine>)
+  /// 但是也提供了一个scan_dyn()方法来返回一个trait object
   pub trait Engine: Send {
-      // scan()返回的迭代器
+      /// scan()返回的迭代器
       type ScanIterator<'a>: ScanIterator + 'a
       where
-          Self: Sized + 'a; // 为了对象安全, 忽略// omit in trait objects, for object safety
-
-      /// Deletes a key, or does nothing if it does not exist.
+          Self: Sized + 'a;
+      /// 删除一个key, 如果不存在就什么都不发生
       fn delete(&mut self, key: &[u8]) -> Result<()>;
-
-      /// Flushes any buffered data to the underlying storage medium.
+      /// 将缓冲区的内容写出到存储介质中
       fn flush(&mut self) -> Result<()>;
-
-      /// Gets a value for a key, if it exists.
       fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>>;
-
-      /// Iterates over an ordered range of key/value pairs.
+      /// 遍历指定范围的key/value对
       fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<'_>
       where
-          Self: Sized; // omit in trait objects, for object safety
-
-      /// Like scan, but can be used from trait objects. The iterator will use
-      /// dynamic dispatch, which has a minor performance penalty.
+          Self: Sized;
+      /// 与scan()类似, 能被trait object使用. 由于使用了dynamic dispatch, 所以性能会有所下降
       fn scan_dyn(
           &mut self,
           range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
       ) -> Box<dyn ScanIterator + '_>;
-
-      /// Iterates over all key/value pairs starting with prefix.
+      /// 遍历指定前缀的key/value对
       fn scan_prefix(&mut self, prefix: &[u8]) -> Self::ScanIterator<'_>
       where
-          Self: Sized, // omit in trait objects, for object safety
+          Self: Sized,
       {
           self.scan(keycode::prefix_range(prefix))
       }
-
-      /// Sets a value for a key, replacing the existing value if any.
+      /// 设置一个key/value对, 如果存在则替换
       fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()>;
-
-      /// Returns engine status.
+      /// 获取存储引擎的状态
       fn status(&mut self) -> Result<Status>;
   }
   ```,
@@ -82,8 +92,26 @@ ToyDB使用的存储引擎是BitCask#footnote("https://riak.com/assets/bitcask-i
 + 与LSMTree不同, 单个文件的BitCask需要在压缩的过程中重写整个数据集, 这会导致显著的写放大问题.
 + ToyDB没有使用任何压缩, 比如可变长度的整数.
 
+== ToyDB中使用的BitCask
+
+BitCask是一个非常简单的基于log的kv引擎. BitCask将kv对写入到一个只能追加写的log文件中. 并在内存中维护一个key到文件位置的索引.
+上面这段话存在的隐藏的语义就是:
+- BitCask要求所有的key必须能存放在内存中
+- BitCask在启动的时候需要扫描log文件来构建索引
+
+另外删除文件的时候并不是真正的删除, 而是写入一个墓碑值(tombstone value), 这样在读取的时候就会认为这个key已经被删除了.
+
+log的压缩就是将内存中的key重新写入到一个新的log文件中, 这样就可以删除掉老的log文件. 这个过程会导致写放大问题, 但是这个过程是可以控制的, 比如可以设置一个阈值, 当超过这个阈值的时候才进行压缩.
+
+在ToyDB中, BitCask的实现做了相当程度的简化:
+- ToyDB没有使用固定大小的日志文件, 而是使用了任意大小的仅追加写的日志文件. 这会增加压缩量, 因为每次压缩的时候都会重写整个日志文件, 并且也可能会超过文件系统的文件大小限制.
+- 压缩的时候会阻塞所有的读以及写操作, 这问题不大, 因为ToyDB只会在重启的时候压缩, 并且文件应该也比较小.
+- 没有hint文件, 因为ToyDB的value预估都比较小, hint文件的作用不大(其大小与合并的log文件差不多大).
+- 每一条记录没有timestamps以及checksums
+
+
 == MVCC事务
-MVCC (Multi-Version Concurrency Control)#footnote("TODO") (多版本并发控制)是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("TODO"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
+MVCC (Multi-Version Concurrency Control)#footnote("https://zh.wikipedia.org/wiki/多版本并发控制") (多版本并发控制)是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("TODO"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
 
 ToyDB在存储层实现了MVCC, 可以使用任何实现了`storage::Engine`这个trait的存储引擎. 使用`begin`开始一个新的事务, 这个事务提供常见的kv操作, 比如 `get`, `set`, `delete`等. 事务可以通过`commit`提交(保留更改且对其他事务可见), 也可以通过`rollback`回滚(丢弃修改).
 
@@ -106,3 +134,6 @@ key/value保存为`Key::Version(key, version)`的形式, 其中`key`是用户提
 + 只是实现了快照隔离级别, 并没有实现可序列化隔离级别. 会导致写倾斜(write skew)问题#footnote("https://justinjaffray.com/what-does-write-skew-look-like/").
 + 旧的MVCC版本永远不会被删除, 会导致存储空间的浪费.但是这简化了实现, 也允许完整的数据历史记录.
 + 事务id会在64位后溢出, 没有做处理
+
+
+== 总结
