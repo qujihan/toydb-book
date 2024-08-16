@@ -1,3 +1,6 @@
+#import "../typst-book-template/book.typ": *
+#let path-prefix = figure-root-path + "src/pics/"
+
 = 附录
 #pagebreak(weak: true)
 == 一些环境的准备

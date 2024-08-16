@@ -1,6 +1,7 @@
 #import "../typst-book-template/book.typ": *
-= 存储引擎
+#let path-prefix = figure-root-path + "src/pics/"
 
+= 存储引擎
 #code(
   "tree src/storage",
   "存储引擎的代码结构",
@@ -111,7 +112,7 @@ log的压缩就是将内存中的key重新写入到一个新的log文件中, 这
 
 
 == MVCC事务
-MVCC (Multi-Version Concurrency Control)#footnote("https://zh.wikipedia.org/wiki/多版本并发控制") (多版本并发控制)是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("TODO"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
+MVCC#footnote("Multi-Version Concurrency Control: https://zh.wikipedia.org/wiki/多版本并发控制")是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("https://jepsen.io/consistency/models/snapshot-isolation"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
 
 ToyDB在存储层实现了MVCC, 可以使用任何实现了`storage::Engine`这个trait的存储引擎. 使用`begin`开始一个新的事务, 这个事务提供常见的kv操作, 比如 `get`, `set`, `delete`等. 事务可以通过`commit`提交(保留更改且对其他事务可见), 也可以通过`rollback`回滚(丢弃修改).
 

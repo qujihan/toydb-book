@@ -1,4 +1,6 @@
 #import "../typst-book-template/book.typ": *
+#let path-prefix = figure-root-path + "src/pics/"
+
 = 共识算法Raft
 #code(
   "tree src/raft",
