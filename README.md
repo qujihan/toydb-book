@@ -15,12 +15,12 @@ git clone https://github.com/qujihan/toydb-book.git
 # 下载依赖
 cd toydb-book && git submodule update --init --recursive
 
-# 推荐安装 tqdm(只是为了下载界面好看一点)
-# pip install tqdm
+pip install requests # 下载字体使用
+pip install tqdm # 为了下载界面好看一点
 
 # 下载所需字体
 python typst-book-template/fonts/download.py
 
 # 编译
-python typst-book-template/op.py c
+make c # 实际调用的是 typst-book-template/op.py c
 ```
