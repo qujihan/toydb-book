@@ -1,11 +1,14 @@
-.PHONY: w c f
+.PHONY: w c f font
 
 
 w:
-	python3 .\typst-book-template\op.py w
+	python3 ./typst-book-template/op.py w
 	
 c:
-	python3 .\typst-book-template\op.py c
+	python3 ./typst-book-template/op.py c
 
 f:
-	python3 .\typst-book-template\op.py f
+	python3 ./typst-book-template/op.py f
+
+font:
+	python3 ./typst-book-template/fonts/download.py --proxy

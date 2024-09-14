@@ -5,7 +5,7 @@
 # 编译本书
 
 所需组件
-- python(以及tqdm模块)
+- python(tqdm, requests)
 - typst
 - typstyle(格式化typ代码所需)
 
@@ -19,8 +19,8 @@ pip install requests # 下载字体使用
 pip install tqdm # 为了下载界面好看一点
 
 # 下载所需字体
-python typst-book-template/fonts/download.py
+make font # python3 ./typst-book-template/fonts/download.py --proxy
 
 # 编译
-make c # 实际调用的是 typst-book-template/op.py c
+make c # python3 ./typst-book-template/op.py c
 ```
