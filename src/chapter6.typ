@@ -6,7 +6,7 @@
 == 一些环境的准备
 
 #pagebreak(weak: true)
-== BitCask的论文解读
+== BitCask的论文解读 <bitcask>
 
 
 === 参考

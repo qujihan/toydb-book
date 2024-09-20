@@ -17,36 +17,19 @@
   ```,
 )
 
-ToyDB使用一个可替换的key/value存储引擎, 通过storage_sql和storage_raft选项分别配置SQL和Raft存储引擎. 关于更高层的SQL存储引擎将在SQL部分单独讨论.
+ToyDB使用一个可替换的KV存储引擎, 通过storage_sql和storage_raft选项分别配置SQL和Raft存储引擎. 关于更高层的SQL存储引擎将在SQL部分单独讨论.
 
-== 二进制编码
+== 编码以及存储引擎
 
-=== Key/Value存储
+=== 存储引擎trait
 
-在ToyDB中, 存储引擎可以将任意的key/value作为字节切片(byte slice)存储起来, 另外还需要实现`storage::Engine`这个trait.
+在存储引擎中, 每一对 KV 都是以字母序来存储的字节序列(byte slice). 其中Key是有序的, 这样就可以进行高效的范围查询. 范围查询在一些场景下非常有用, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀). Key应该使用KeyCode进行编码(接下来会讲到). 在写入以后, 数据并没有持久化, 还需要调用flush()保证数据持久化.
 
-// #reference-block("一个key/value的存储引擎以字母序存储字节序列.
-// 其中key都是有序的, 这样就可以高效的进行范围查询, 这个在一些场景还是非常有用的, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀).
-// 另外key都应该使用KeyCode进行编码.
-// 在写入后, 只有调用flush()之后才能保证数据持久化.
+在ToyDB中, 即使是读操作, 也只支持单线程, 这是因为所有方法都包含一个存储引擎的可变引用. 无论是raft的日志运用到状态机还是对文件的读取操作, 都是只能顺序访问的.
 
-// 在toydb中, 即使是读操作, 也只支持单线程, 这是因为所有方法都包含一个存储引擎的可变引用.
-// 无论是raft的日志运用到状态机还是对文件的读取操作, 都是只能顺序访问的.
-// ")
+在ToyDB中, 实现了一个基于BitCask的, 一个基于标准库BTree的存储引擎.
 
-#reference-block()[
-  一个key/value的存储引擎以字母序存储字节序列.
-
-  其中key都是有序的, 这样就可以高效的进行范围查询, 这个在一些场景还是非常有用的, 比如在执行一个扫描表的SQL的时候(所有的行都是以相同的key前缀).
-
-  另外key都应该使用KeyCode进行编码.
-
-  在写入后, 只有调用flush()之后才能保证数据持久化.
-
-  在toydb中, 即使是读操作, 也只支持单线程, 这是因为所有方法都包含一个存储引擎的可变引用.
-
-  无论是raft的日志运用到状态机还是对文件的读取操作, 都是只能顺序访问的.
-]
+每一个可以被ToyDB使用的存储引擎都需要实现`storage::Engine`这个trait. 下面看一下这个trait.
 
 #code(
   "toydb/src/storage/engine.rs",
@@ -88,7 +71,7 @@ ToyDB使用一个可替换的key/value存储引擎, 通过storage_sql和storage_
   ```,
 )
 
-其中的`get`, `set`以及`delete`只是简单的读取以及写入key/value对, 并且通过`flush`可以确保将缓冲区的内容写出到存储介质中(比如通过`fsync`这个系统调用). `scan`按照顺序迭代指定的key/value对范围. 这个对一些高级功能(比如:SQL表扫描)至关重要. 并且暗含了以下一些语义:
+其中的`get`, `set`以及`delete`只是简单的读取以及写入key/value对, 并且通过`flush`可以确保将缓冲区的内容写出到存储介质中(通过`fsync`系统调用等方式). `scan`按照顺序迭代指定的KV对范围. 这个对一些高级功能(SQL表扫描等)至关重要. 并且暗含了以下一些语义:
 - 为了提高性能, 存储的数据应该是有序的.
 - key应该保留字节编码, 这样才能实现范围扫描.
 
@@ -99,28 +82,228 @@ ToyDB使用一个可替换的key/value存储引擎, 通过storage_sql和storage_
 
 ToyDB使用的存储引擎是BitCask#footnote("https://riak.com/assets/bitcask-intro.pdf")的变种, 在写入的时候, 先写入到log文件中, 索引会在内存中维护key与文件位置的关系. 当垃圾量(包含替换以及删除的key)大于20%的时候, 将在内存中的key写入到新的log文件中, 替换掉老的log文件.
 
-=== key/value中实现的取舍
-+ BitCask需要key的集合在内存中, 而且启动的时候需要扫描log文件来构建索引.
-+ 与LSMTree不同, 单个文件的BitCask需要在压缩的过程中重写整个数据集, 这会导致显著的写放大问题.
-+ ToyDB没有使用任何压缩, 比如可变长度的整数.
 
 == ToyDB中使用的BitCask
 
-BitCask是一个非常简单的基于log的kv引擎. BitCask将kv对写入到一个只能追加写的log文件中. 并在内存中维护一个key到文件位置的索引.
+BitCask(可以参考@bitcask)是一个非常简单的基于Log的KV引擎. BitCask将KV对写入到一个只能追加写的Log文件中. 并在内存中维护一个Key到文件位置的索引.
 上面这段话存在的隐藏的语义就是:
-- BitCask要求所有的key必须能存放在内存中
-- BitCask在启动的时候需要扫描log文件来构建索引
+- BitCask要求所有的Key必须能存放在内存中
+- BitCask在启动的时候需要扫描Log文件来构建索引
 
-另外删除文件的时候并不是真正的删除, 而是写入一个墓碑值(tombstone value), 这样在读取的时候就会认为这个key已经被删除了.
+另外删除文件的时候并不是真正的删除, 而是写入一个墓碑值(tombstone value), 这样在读取的时候就会认为这个Key已经被删除了.
 
-log的压缩就是将内存中的key重新写入到一个新的log文件中, 这样就可以删除掉老的log文件. 这个过程会导致写放大问题, 但是这个过程是可以控制的, 比如可以设置一个阈值, 当超过这个阈值的时候才进行压缩.
+Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这样就可以删除掉老的Log文件. 这个过程会导致写放大问题, 但是这个过程是可以控制的, 比如可以设置一个阈值, 当超过这个阈值的时候才进行压缩.
 
+
+下面来看看ToyDB中的Bitcask是如何实现的.
+
+#code(
+  "toydb/src/storage/bitcask.rs",
+  "bitcask",
+  ```rust
+  struct Log {
+      /// Path to the log file.
+      /// 日志文件的路径
+      path: PathBuf,
+      /// The opened file containing the log.
+      /// 包含日志的打开文件
+      file: std::fs::File,
+  }
+
+  /// Maps keys to a value position and length in the log file.
+  /// 将key映射到日志文件中的value位置和长度
+  type KeyDir = std::collections::BTreeMap<Vec<u8>, (u64, u32)>;
+
+  pub struct BitCask {
+      /// The active append-only log file.
+      /// 当前的只追加写的日志文件
+      log: Log,
+      /// Maps keys to a value position and length in the log file.
+      /// 将key映射到日志文件中的value位置和长度
+      keydir: KeyDir,
+  }
+  ```,
+)
+
+在ToyDB中, `BitCask` 中包含一个管理内存中索引文件的数据结构 `keydir` 以及一个用来写Log的文件 `log`.
+
+其中 `keydir` 是一个BTree, key是一个Vec<u8>, value是一个元组(u64, u32), 其中u64是value在Log文件中的位置, u32是value的长度. 这个结构是有序的, 这样就可以进行范围查询.
+
+再来看 `log`, 它包含了一个文件路径 `path` 以及一个文件句柄 `file`. 这个文件是只追加写的, 这样就可以保证写入的顺序是正确的.
+
+下面分为两个部分来描述一下代码, 分别是 `log`实现部分以及`BitCask`实现部分.
+
+=== Log实现
+
+每一个log entry包含四个部分:
+- Key 的长度, 大端u32
+- Value 的长度, 大端i32, -1 表示墓碑值
+- Key 的字节序列(最大 2GB)
+- Value 的字节序列(最大 2GB)
+
+在Log中, `new` 比较简单, 是打开一个log文件, 当不存在的时候就创建这个文件. 并且在使用过程中一直使用的排它锁, 这样就可以保证只有一个线程在写入.
+
+
+#code(
+  "toydb/src/storage/bitcask.rs",
+  "new",
+  ```rust
+  fn new(path: PathBuf) -> Result<Self> {
+      if let Some(dir) = path.parent() {
+          std::fs::create_dir_all(dir)?
+      }
+      let file = std::fs::OpenOptions::new()
+          .read(true)
+          .write(true)
+          .create(true)
+          .truncate(false)
+          .open(&path)?;
+      file.try_lock_exclusive()?;
+      Ok(Self { path, file })
+  }
+  ```,
+)
+
+`read_value`,`write_value` 这两个函数也比较简单, 用于读取value以及写入KV对.
+
+#code(
+  "toydb/src/storage/bitcask.rs",
+  "read_value",
+  ```rust
+  /// 从file的value_pos位置读取value_len长度的数据
+  fn read_value(&mut self, value_pos: u64, value_len: u32) -> Result<Vec<u8>> {
+      let mut value = vec![0; value_len as usize];
+      self.file.seek(SeekFrom::Start(value_pos))?;
+      self.file.read_exact(&mut value)?;
+      Ok(value)
+  }
+  ```,
+)
+
+#code(
+  "toydb/src/storage/bitcask.rs",
+  "write_value",
+  ```rust
+  /// 写入key/value对, 返回写入的位置和长度
+  /// 墓碑值使用 None Value
+  fn write_entry(&mut self, key: &[u8], value: Option<&[u8]>) -> Result<(u64, u32)> {
+      let key_len = key.len() as u32;
+      // map_or 是 Option类型的方法, 用于在 Option 为 Some 以及 None 时执行不同的操作
+      let value_len = value.map_or(0, |v| v.len() as u32);
+      let value_len_or_tombstone = value.map_or(-1, |v| v.len() as i32);
+      // 这里 4 + 4 就是 key_len(u32) 和 value_len_or_tombstone(u32) 的长度
+      let len = 4 + 4 + key_len + value_len;
+
+      let pos = self.file.seek(SeekFrom::End(0))?;
+      // BufWriter 是一个带有缓冲的写操作, 可以减少实际IO操作的次数
+      let mut w = BufWriter::with_capacity(len as usize, &mut self.file);
+      w.write_all(&key_len.to_be_bytes())?;
+      w.write_all(&value_len_or_tombstone.to_be_bytes())?;
+      w.write_all(key)?;
+      if let Some(value) = value {
+          w.write_all(value)?;
+      }
+      w.flush()?;
+
+      Ok((pos, len))
+  }
+  ```,
+)
+
+`build_keydir` 就比较复杂了, 用来构建索引(ToyDB只有在重启的时候才会构建).
+
+#code(
+  "toydb/src/storage/bitcask.rs",
+  "build_keydir",
+  ```rust
+  /// Builds a keydir by scanning the log file. If an incomplete entry is
+  /// encountered, it is assumed to be caused by an incomplete write operation
+  /// and the remainder of the file is truncated.
+  /// 通过扫描log文件来构建一个keydir. 如果遇到不完整的条目, 就会假设是因为不完整的写操作
+  /// 并且截断文件.
+  fn build_keydir(&mut self) -> Result<KeyDir> {
+      let mut len_buf = [0u8; 4];
+      let mut keydir = KeyDir::new();
+      let file_len = self.file.metadata()?.len();
+      let mut r = BufReader::new(&mut self.file);
+      let mut pos = r.seek(SeekFrom::Start(0))?;
+
+      while pos < file_len {
+          // Read the next entry from the file, returning the key, value
+          // position, and value length or None for tombstones.
+          // 读取一条新的条目, 返回key, value位置, 以及value长度或者墓碑值(None)
+          let result = || -> std::result::Result<(Vec<u8>, u64, Option<u32>), std::io::Error> {
+              // r 在当前文件指针位置读取数据到 len_buf 中
+              // 读取完成以后文件指针会自动向后移动 len_buf.len() 的大小
+              r.read_exact(&mut len_buf)?;
+              let key_len = u32::from_be_bytes(len_buf);
+              r.read_exact(&mut len_buf)?;
+              let value_len_or_tombstone = match i32::from_be_bytes(len_buf) {
+                  l if l >= 0 => Some(l as u32),
+                  _ => None, // -1 for tombstones
+              };
+              let value_pos = pos + 4 + 4 + key_len as u64;
+
+              let mut key = vec![0; key_len as usize];
+              r.read_exact(&mut key)?;
+
+              if let Some(value_len) = value_len_or_tombstone {
+                  if value_pos + value_len as u64 > file_len {
+                      // 这里就是遇到了不完整的条目
+                      return Err(std::io::Error::new(
+                          std::io::ErrorKind::UnexpectedEof,
+                          "value extends beyond end of file",
+                      ));
+                  }
+                  // 在当前文件指针位置移动 value_len 的大小
+                  // 使用 seek_relative 而不是 seek 是为了避免丢弃缓冲区
+                  //
+                  // seek 是把文件指针立刻移动到某个位置, 旧的缓冲区的数据可能和新的位置不匹配
+                  // 所以缓冲失效会被丢弃
+                  r.seek_relative(value_len as i64)?; // avoids discarding buffer
+              }
+
+              Ok((key, value_pos, value_len_or_tombstone))
+          }();
+
+          match result {
+              // Populate the keydir with the entry, or remove it on tombstones.
+              // 填充 keydir, 或者在墓碑值的时候删除
+              Ok((key, value_pos, Some(value_len))) => {
+                  keydir.insert(key, (value_pos, value_len));
+                  pos = value_pos + value_len as u64;
+              }
+              Ok((key, value_pos, None)) => {
+                  keydir.remove(&key);
+                  pos = value_pos;
+              }
+              // If an incomplete entry was found at the end of the file, assume an
+              // incomplete write and truncate the file.
+              // 这里就是遇到了不完整的条目
+              Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                  log::error!("Found incomplete entry at offset {}, truncating file", pos);
+                  self.file.set_len(pos)?;
+                  break;
+              }
+              Err(err) => return Err(err.into()),
+          }
+      }
+      Ok(keydir)
+  }
+  ```,
+)
+=== BitCask实现
+
+
+=== ToyDB中BitCask的取舍
 在ToyDB中, BitCask的实现做了相当程度的简化:
-- ToyDB没有使用固定大小的日志文件, 而是使用了任意大小的仅追加写的日志文件. 这会增加压缩量, 因为每次压缩的时候都会重写整个日志文件, 并且也可能会超过文件系统的文件大小限制.
-- 压缩的时候会阻塞所有的读以及写操作, 这问题不大, 因为ToyDB只会在重启的时候压缩, 并且文件应该也比较小.
-- 没有hint文件, 因为ToyDB的value预估都比较小, hint文件的作用不大(其大小与合并的log文件差不多大).
-- 每一条记录没有timestamps以及checksums
-
++ ToyDB没有使用固定大小的日志文件, 而是使用了任意大小的仅追加写的日志文件. 这会增加压缩量, 因为每次压缩的时候都会重写整个日志文件, 并且也可能会超过文件系统的文件大小限制.
++ 压缩的时候会阻塞所有的读以及写操作, 这问题不大, 因为ToyDB只会在重启的时候压缩, 并且文件应该也比较小.
++ 没有hint文件, 因为ToyDB的value预估都比较小, hint文件的作用不大(其大小与合并的Log文件差不多大).
++ 每一条记录没有timestamps以及checksums
++ BitCask需要key的集合在内存中, 而且启动的时候需要扫描log文件来构建索引.
++ 与LSMTree不同, 单个文件的BitCask需要在压缩的过程中重写整个数据集, 这会导致显著的写放大问题.
++ ToyDB没有使用任何压缩, 比如可变长度的整数.
 
 == MVCC事务
 MVCC#footnote("Multi-Version Concurrency Control: https://zh.wikipedia.org/wiki/多版本并发控制")是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("https://jepsen.io/consistency/models/snapshot-isolation"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
