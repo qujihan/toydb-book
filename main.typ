@@ -3,7 +3,7 @@
 #set text(lang: "zh")
 #show: book.with(info: (
   name: "Quhaha",
-  title: "从零开始的分布式数据库生活 \n (From Zero to Database)",
+  title: "从零开始的分布式数据库生活 \n (From Zero to Distributed Database)",
 ))
 
 #include "src/chapter1.typ"
