@@ -1,17 +1,5 @@
 # WIP
-# 从零开始的分布式数据库生活(From Zero to Distributed Database)
-
-## TODO
-正在把理解理成书中....
-- 存储引擎
-    - [ ] Bitcask存储引擎
-    - [ ] MVCC
-- 分布式算法
-    - [ ] Raft
-- SQL
-    - [ ] SQL解析
-    - [ ] SQL优化
-    - [ ] SQL执行
+# 从零开始的分布式数据库生活
 
 # 编译本书
 
@@ -35,3 +23,15 @@ make font # python3 ./typst-book-template/fonts/download.py --proxy
 # 编译
 make c # python3 ./typst-book-template/op.py c
 ```
+
+## TODO
+正在把理解理成书中....
+- 存储引擎
+    - [ ] Bitcask存储引擎
+    - [ ] MVCC
+- 分布式算法
+    - [ ] Raft
+- SQL
+    - [ ] SQL解析
+    - [ ] SQL优化
+    - [ ] SQL执行
