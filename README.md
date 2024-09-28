@@ -1,6 +1,17 @@
-# 从零开始的分布式数据库生活(ToyDB走读笔记)
+# WIP
+# 从零开始的分布式数据库生活(From Zero to Distributed Database)
 
-> [ToyDB](https://github.com/erikgrinaker/toydb) 仓库
+## TODO
+正在把理解理成书中....
+- 存储引擎
+    - [ ] Bitcask存储引擎
+    - [ ] MVCC
+- 分布式算法
+    - [ ] Raft
+- SQL
+    - [ ] SQL解析
+    - [ ] SQL优化
+    - [ ] SQL执行
 
 # 编译本书
 
