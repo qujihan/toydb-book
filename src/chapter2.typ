@@ -5,6 +5,7 @@
 #code(
   "tree src/storage",
   "存储引擎的代码结构",
+)[
   ```zsh
   src/storage
   ├── bitcask.rs # 基于BitCask实现的存储引擎
@@ -14,8 +15,8 @@
   ├── mvcc.rs    # 在存储引擎之上实现MVCC事务
   └── testscripts
       └── ....   # 测试文件
-  ```,
-)
+  ```
+]
 
 ToyDB使用一个可替换的KV存储引擎, 通过storage_sql和storage_raft选项分别配置SQL和Raft存储引擎. 关于更高层的SQL存储引擎将在SQL部分单独讨论.
 
@@ -34,6 +35,7 @@ ToyDB使用一个可替换的KV存储引擎, 通过storage_sql和storage_raft选
 #code(
   "toydb/src/storage/engine.rs",
   "strong::Engine",
+)[
   ```rust
   /// 带有 Self: Sized 是为了无法使用trait object(比如Box<dyn Engine>)
   /// 但是也提供了一个scan_dyn()方法来返回一个trait object
@@ -68,8 +70,8 @@ ToyDB使用一个可替换的KV存储引擎, 通过storage_sql和storage_raft选
       /// 获取存储引擎的状态
       fn status(&mut self) -> Result<Status>;
   }
-  ```,
-)
+  ```
+]
 
 其中的`get`, `set`以及`delete`只是简单的读取以及写入key/value对, 并且通过`flush`可以确保将缓冲区的内容写出到存储介质中(通过`fsync`系统调用等方式). `scan`按照顺序迭代指定的KV对范围. 这个对一些高级功能(SQL表扫描等)至关重要. 并且暗含了以下一些语义:
 - 为了提高性能, 存储的数据应该是有序的.
@@ -100,6 +102,7 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
 #code(
   "toydb/src/storage/bitcask.rs",
   "bitcask",
+)[
   ```rust
   struct Log {
       /// Path to the log file.
@@ -122,8 +125,9 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
       /// 将key映射到日志文件中的value位置和长度
       keydir: KeyDir,
   }
-  ```,
-)
+  ```
+]<bitcask_code>
+
 
 在ToyDB中, `BitCask` 中包含一个管理内存中索引文件的数据结构 `keydir` 以及一个用来写Log的文件 `log`.
 
@@ -147,6 +151,7 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
 #code(
   "toydb/src/storage/bitcask.rs",
   "new",
+)[
   ```rust
   fn new(path: PathBuf) -> Result<Self> {
       if let Some(dir) = path.parent() {
@@ -161,14 +166,16 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
       file.try_lock_exclusive()?;
       Ok(Self { path, file })
   }
-  ```,
-)
+  ```
+]
+
 
 `read_value`,`write_value` 这两个函数也比较简单, 用于读取value以及写入KV对.
 
 #code(
   "toydb/src/storage/bitcask.rs",
   "read_value",
+)[
   ```rust
   /// 从file的value_pos位置读取value_len长度的数据
   fn read_value(&mut self, value_pos: u64, value_len: u32) -> Result<Vec<u8>> {
@@ -177,12 +184,13 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
       self.file.read_exact(&mut value)?;
       Ok(value)
   }
-  ```,
-)
+  ```
+]
 
 #code(
   "toydb/src/storage/bitcask.rs",
   "write_value",
+)[
   ```rust
   /// 写入key/value对, 返回写入的位置和长度
   /// 墓碑值使用 None Value
@@ -207,14 +215,15 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
 
       Ok((pos, len))
   }
-  ```,
-)
+  ```
+]
 
 `build_keydir` 就比较复杂了, 用来构建索引(ToyDB只有在重启的时候才会构建).
 
 #code(
   "toydb/src/storage/bitcask.rs",
   "build_keydir",
+)[
   ```rust
   /// Builds a keydir by scanning the log file. If an incomplete entry is
   /// encountered, it is assumed to be caused by an incomplete write operation
@@ -290,11 +299,81 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
       }
       Ok(keydir)
   }
-  ```,
-)
+  ```
+]
 === BitCask实现
 
-在知道了 `log` 是如何实现的以后, 就可以更好的理解BitCask的实现了.
+在知道了 `log` 是如何实现的以后, 就可以更好的理解BitCask的实现了. 在@bitcask_code 中可以看到, `BitCask` 中包含了一个 `log` 以及一个 `keydir`. `log` 用来写入KV对, `keydir` 用来维护内存中的索引.
+
+下面先看一下 `BitCask` 中的一些周边函数, 然后再看一下如何实现 `Engine` 这个trait.
+
+
+下面展示的两个函数是为了
+#code(
+  "toydb/src/storage/bitcask.rs",
+  "impl BitCask",
+)[
+  ```rust
+    /// Opens or creates a BitCask database in the given file.
+    /// 通过 path 打开或者创建一个 BitCask 数据库
+    pub fn new(path: PathBuf) -> Result<Self> {
+        // 这里非常简单, 就是调用前面实现的 Log::new
+        log::info!("Opening database {}", path.display());
+        let mut log = Log::new(path.clone())?;
+        let keydir = log.build_keydir()?;
+        log::info!("Indexed {} live keys in {}", keydir.len(), path.display());
+        Ok(Self { log, keydir })
+    }
+
+    /// Opens a BitCask database, and automatically compacts it if the amount
+    /// of garbage exceeds the given ratio and byte size when opened.
+    /// 打开一个 BitCask 数据库, 如果打开的时候垃圾的比例和字节大小超过给定的阈值, 就会自动压缩
+    pub fn new_compact(
+        path: PathBuf,
+        garbage_min_fraction: f64,
+        garbage_min_bytes: u64,
+    ) -> Result<Self> {
+        let mut s = Self::new(path)?;
+
+        let status = s.status()?;
+        if Self::should_compact(
+            status.garbage_disk_size,
+            status.total_disk_size,
+            garbage_min_fraction,
+            garbage_min_bytes,
+        ) {
+            log::info!(
+                "Compacting {} to remove {:.0}% garbage ({} MB out of {} MB)",
+                s.log.path.display(),
+                status.garbage_percent(),
+                status.garbage_disk_size / 1024 / 1024,
+                status.total_disk_size / 1024 / 1024
+            );
+            s.compact()?;
+            log::info!(
+                "Compacted {} to size {} MB",
+                s.log.path.display(),
+                (status.total_disk_size - status.garbage_disk_size) / 1024 / 1024
+            );
+        }
+
+        Ok(s)
+    }
+
+    /// Returns true if the log file should be compacted.
+    fn should_compact(
+        garbage_size: u64,
+        total_size: u64,
+        min_fraction: f64,
+        min_bytes: u64,
+    ) -> bool {
+        let garbage_fraction = garbage_size as f64 / total_size as f64;
+        garbage_size > 0 && garbage_size >= min_bytes && garbage_fraction >= min_fraction
+    }
+  ```
+]
+
+
 
 
 === ToyDB中BitCask的取舍
