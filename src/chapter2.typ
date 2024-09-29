@@ -71,34 +71,85 @@ ToyDB使用一个可替换的KV存储引擎, 通过storage_sql和storage_raft选
       fn status(&mut self) -> Result<Status>;
   }
   ```
-]
+]<engine>
 
 其中的`get`, `set`以及`delete`只是简单的读取以及写入key/value对, 并且通过`flush`可以确保将缓冲区的内容写出到存储介质中(通过`fsync`系统调用等方式). `scan`按照顺序迭代指定的KV对范围. 这个对一些高级功能(SQL表扫描等)至关重要. 并且暗含了以下一些语义:
 - 为了提高性能, 存储的数据应该是有序的.
 - key应该保留字节编码, 这样才能实现范围扫描.
 
-对于存储引擎而已, 并不关心`key`是什么, 但是为了方便上层的调用, 提供了一个称为`KeyCode`的order-preserving#footnote("TODO")编码.
+对于存储引擎而已, 并不关心`key`是什么, 但是为了方便上层的调用, 提供了一个称为`KeyCode`的order-preserving编码, 具体可以在 @encoding 看到.
 
-// TODO 没看懂这里啥玩意这是
+此外在上面的代码中还需要注意两个东西, 一个是 `ScanIterator`, 一个是 `Status`. `ScanIterator`是一个迭代器, 用于遍历存储引擎中的KV对. `Status`是用于获取存储引擎的状态, 比如存储引擎的大小, 垃圾量等.
 
+现在简单看一下 `Status`.
 
-ToyDB使用的存储引擎是BitCask#footnote("https://riak.com/assets/bitcask-intro.pdf")的变种, 在写入的时候, 先写入到log文件中, 索引会在内存中维护key与文件位置的关系. 当垃圾量(包含替换以及删除的key)大于20%的时候, 将在内存中的key写入到新的log文件中, 替换掉老的log文件.
+#code(
+  "toydb/src/storage/engine.rs",
+  "Status",
+)[
+  ```rust
+  #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+  pub struct Status {
+      /// The name of the storage engine.
+      /// 存储引擎的名字
+      pub name: String,
+      /// The number of live keys in the engine.
+      /// 存储引擎中的活跃key的数量
+      pub keys: u64,
+      /// The logical size of live key/value pairs.
+      /// 存储引擎中的活跃key/value对的逻辑大小
+      pub size: u64,
+      /// The on-disk size of all data, live and garbage.
+      /// 所有数据的磁盘大小, 包括活跃和垃圾数据
+      pub total_disk_size: u64,
+      /// The on-disk size of live data.
+      /// 活跃数据的磁盘大小
+      pub live_disk_size: u64,
+      /// The on-disk size of garbage data.
+      /// 垃圾数据的磁盘大小
+      pub garbage_disk_size: u64,
+  }
 
+  impl Status {
+      pub fn garbage_percent(&self) -> f64 {
+          if self.total_disk_size == 0 {
+              return 0.0;
+          }
+          self.garbage_disk_size as f64 / self.total_disk_size as f64 * 100.0
+      }
+  }
+  ```
+]
 
-== ToyDB中使用的BitCask
+简简单单几个属性, 以及定义了一个计算垃圾比例的方法. 这个比例可以用来判断是否需要进行压缩.
 
-BitCask(可以参考@bitcask)是一个非常简单的基于Log的KV引擎. BitCask将KV对写入到一个只能追加写的Log文件中. 并在内存中维护一个Key到文件位置的索引.
-上面这段话存在的隐藏的语义就是:
-- BitCask要求所有的Key必须能存放在内存中
-- BitCask在启动的时候需要扫描Log文件来构建索引
+再看一下 `ScanIterator`.
 
-另外删除文件的时候并不是真正的删除, 而是写入一个墓碑值(tombstone value), 这样在读取的时候就会认为这个Key已经被删除了.
+#code("toydb/src/storage/engine.rs", "ScanIterator")[
+  ```rust
+  /// A scan iterator, with a blanket implementation (in lieu of trait aliases).
+  pub trait ScanIterator: DoubleEndedIterator<Item = Result<(Vec<u8>, Vec<u8>)>> {}
 
-Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这样就可以删除掉老的Log文件. 这个过程会导致写放大问题, 但是这个过程是可以控制的, 比如可以设置一个阈值, 当超过这个阈值的时候才进行压缩.
+  impl<I: DoubleEndedIterator<Item = Result<(Vec<u8>, Vec<u8>)>>> ScanIterator for I {}
+  ```
+]
 
+这里定义了一个 `trait`, 用于遍历存储引擎中的KV对 (@engine 中 `Scan*` 所用). 这个 `trait` 指定了 `Item` (`Item` 就是迭代项)类型为 `Result<(Vec<u8>, Vec<u8>)>`, 其中 `Vec<u8>, Vec<u8>` 分别是key, value. 另外这个 `trait` 还需要组合 `DoubleEndedIterator` 这个 `trait`.
 
-下面来看看ToyDB中的Bitcask是如何实现的.
+另外 `ScanIterator` 没有定义任何额外的方法, 这个实现是空的, 这种方式称为 blanket implementation(通用实现), 这个允许我们为一大类类型提供一个统一的实现.
 
+== ToyDB中的BitCask
+ToyDB使用的可持久化的存储引擎是BitCask(参考@bitcask)的*变种*. 简单来说, 就是在写入的时候, 先写入到只能追加写的log文件中, 然后在内存中维护一个索引, 索引内容为 (key -> 文件位置以及长度). 
+
+当垃圾量(包含替换以及删除的key)大于一定阈值的时候, 将在内存中的key写入到新的log文件中, 然后替换老的log文件. 替换的过程被称为压缩, 会导致写放大问题, 但是可以通过控制阈值来减小影响. 
+
+通过上面的描述, 可以分析出几个语义:
+- BitCask要求所有的Key必须能存放在内存中.
+- BitCask在启动的时候需要扫描Log文件来构建索引.
+- 删除文件的时候并不是真正的删除.
+    - 实际上是写入一个墓碑值(tombstone value), 读取到墓碑值就认为是删除了.
+
+下面先看一下ToyDB的宏观架构, 再自底向上的看一下实现过程.
 #code(
   "toydb/src/storage/bitcask.rs",
   "bitcask",
@@ -138,7 +189,6 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
 下面先看 `log` 实现部分, 再来回看 `BitCask` 的部分.
 
 === Log实现
-
 每一个log entry包含四个部分:
 - Key 的长度, 大端u32
 - Value 的长度, 大端i32, -1 表示墓碑值
@@ -146,7 +196,6 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
 - Value 的字节序列(最大 2GB)
 
 在Log中, `new` 比较简单, 是打开一个log文件, 当不存在的时候就创建这个文件. 并且在使用过程中一直使用的排它锁, 这样就可以保证只有一个线程在写入.
-
 
 #code(
   "toydb/src/storage/bitcask.rs",
@@ -303,12 +352,12 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
 ]
 === BitCask实现
 
-在知道了 `log` 是如何实现的以后, 就可以更好的理解BitCask的实现了. 在@bitcask_code 中可以看到, `BitCask` 中包含了一个 `log` 以及一个 `keydir`. `log` 用来写入KV对, `keydir` 用来维护内存中的索引.
+在知道了 `log` 是如何实现的以后, 就可以更好的理解BitCask的实现了. 回忆一下, @bitcask_code 中, `BitCask` 中包含了一个 `log` 以及一个 `keydir`. `log` 用来写入KV对, `keydir` 用来维护内存中的索引.
 
 下面先看一下 `BitCask` 中的一些周边函数, 然后再看一下如何实现 `Engine` 这个trait.
 
+先来看看 `BitCask` 的构造函数, `new` 和 `new_compact`. 这个两个函数的区别就是 `new_compact` 会在打开的时候自动压缩.
 
-下面展示的两个函数是为了
 #code(
   "toydb/src/storage/bitcask.rs",
   "impl BitCask",
@@ -361,6 +410,7 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
     }
 
     /// Returns true if the log file should be compacted.
+    /// 如果日志文件应该被压缩, 就返回 true
     fn should_compact(
         garbage_size: u64,
         total_size: u64,
@@ -385,6 +435,9 @@ Log的压缩就是将内存中的Key重新写入到一个新的Log文件中, 这
 + BitCask需要key的集合在内存中, 而且启动的时候需要扫描log文件来构建索引.
 + 与LSMTree不同, 单个文件的BitCask需要在压缩的过程中重写整个数据集, 这会导致显著的写放大问题.
 + ToyDB没有使用任何压缩, 比如可变长度的整数.
+
+
+== ToyDB中的内存存储引擎
 
 == MVCC事务
 MVCC#footnote("Multi-Version Concurrency Control: https://zh.wikipedia.org/wiki/多版本并发控制")是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("https://jepsen.io/consistency/models/snapshot-isolation"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
