@@ -139,15 +139,15 @@ ToyDB使用一个可替换的KV存储引擎, 通过storage_sql和storage_raft选
 另外 `ScanIterator` 没有定义任何额外的方法, 这个实现是空的, 这种方式称为 blanket implementation(通用实现), 这个允许我们为一大类类型提供一个统一的实现.
 
 == ToyDB中的BitCask
-ToyDB使用的可持久化的存储引擎是BitCask(参考@bitcask)的*变种*. 简单来说, 就是在写入的时候, 先写入到只能追加写的log文件中, 然后在内存中维护一个索引, 索引内容为 (key -> 文件位置以及长度). 
+ToyDB使用的可持久化的存储引擎是BitCask(参考@bitcask)的*变种*. 简单来说, 就是在写入的时候, 先写入到只能追加写的log文件中, 然后在内存中维护一个索引, 索引内容为 (key -> 文件位置以及长度).
 
-当垃圾量(包含替换以及删除的key)大于一定阈值的时候, 将在内存中的key写入到新的log文件中, 然后替换老的log文件. 替换的过程被称为压缩, 会导致写放大问题, 但是可以通过控制阈值来减小影响. 
+当垃圾量(包含替换以及删除的key)大于一定阈值的时候, 将在内存中的key写入到新的log文件中, 然后替换老的log文件. 替换的过程被称为压缩, 会导致写放大问题, 但是可以通过控制阈值来减小影响.
 
 通过上面的描述, 可以分析出几个语义:
 - BitCask要求所有的Key必须能存放在内存中.
 - BitCask在启动的时候需要扫描Log文件来构建索引.
 - 删除文件的时候并不是真正的删除.
-    - 实际上是写入一个墓碑值(tombstone value), 读取到墓碑值就认为是删除了.
+  - 实际上是写入一个墓碑值(tombstone value), 读取到墓碑值就认为是删除了.
 
 下面先看一下ToyDB的宏观架构, 再自底向上的看一下实现过程.
 #code(
@@ -356,73 +356,200 @@ ToyDB使用的可持久化的存储引擎是BitCask(参考@bitcask)的*变种*. 
 
 下面先看一下 `BitCask` 中的一些周边函数, 然后再看一下如何实现 `Engine` 这个trait.
 
-先来看看 `BitCask` 的构造函数, `new` 和 `new_compact`. 这个两个函数的区别就是 `new_compact` 会在打开的时候自动压缩.
+先来看看 `BitCask` 的构造函数以及析构函数, `new` 和 `new_compact`. 这个两个函数的区别就是 `new_compact` 会在打开的时候自动压缩. 关于析构函数, 会在Drop的时候尝试flush文件.
 
-#code(
-  "toydb/src/storage/bitcask.rs",
-  "impl BitCask",
-)[
+#code("toydb/src/storage/bitcask.rs", "impl Bitcask")[
   ```rust
-    /// Opens or creates a BitCask database in the given file.
-    /// 通过 path 打开或者创建一个 BitCask 数据库
-    pub fn new(path: PathBuf) -> Result<Self> {
-        // 这里非常简单, 就是调用前面实现的 Log::new
-        log::info!("Opening database {}", path.display());
-        let mut log = Log::new(path.clone())?;
-        let keydir = log.build_keydir()?;
-        log::info!("Indexed {} live keys in {}", keydir.len(), path.display());
-        Ok(Self { log, keydir })
-    }
+  /// Opens or creates a BitCask database in the given file.
+  /// 通过 path 打开或者创建一个 BitCask 数据库
+  pub fn new(path: PathBuf) -> Result<Self> {
+      // 这里非常简单, 就是调用前面实现的 Log::new
+      log::info!("Opening database {}", path.display());
+      let mut log = Log::new(path.clone())?;
+      let keydir = log.build_keydir()?;
+      log::info!("Indexed {} live keys in {}", keydir.len(), path.display());
+      Ok(Self { log, keydir })
+  }
 
-    /// Opens a BitCask database, and automatically compacts it if the amount
-    /// of garbage exceeds the given ratio and byte size when opened.
-    /// 打开一个 BitCask 数据库, 如果打开的时候垃圾的比例和字节大小超过给定的阈值, 就会自动压缩
-    pub fn new_compact(
-        path: PathBuf,
-        garbage_min_fraction: f64,
-        garbage_min_bytes: u64,
-    ) -> Result<Self> {
-        let mut s = Self::new(path)?;
+  /// Opens a BitCask database, and automatically compacts it if the amount
+  /// of garbage exceeds the given ratio and byte size when opened.
+  /// 打开一个 BitCask 数据库, 如果打开的时候垃圾的比例和字节大小超过给定的阈值, 就会自动压缩
+  pub fn new_compact(
+      path: PathBuf,
+      garbage_min_fraction: f64,
+      garbage_min_bytes: u64,
+  ) -> Result<Self> {
+      let mut s = Self::new(path)?;
 
-        let status = s.status()?;
-        if Self::should_compact(
-            status.garbage_disk_size,
-            status.total_disk_size,
-            garbage_min_fraction,
-            garbage_min_bytes,
-        ) {
-            log::info!(
-                "Compacting {} to remove {:.0}% garbage ({} MB out of {} MB)",
-                s.log.path.display(),
-                status.garbage_percent(),
-                status.garbage_disk_size / 1024 / 1024,
-                status.total_disk_size / 1024 / 1024
-            );
-            s.compact()?;
-            log::info!(
-                "Compacted {} to size {} MB",
-                s.log.path.display(),
-                (status.total_disk_size - status.garbage_disk_size) / 1024 / 1024
-            );
+      let status = s.status()?;
+      if Self::should_compact(
+          status.garbage_disk_size,
+          status.total_disk_size,
+          garbage_min_fraction,
+          garbage_min_bytes,
+      ) {
+          log::info!(
+              "Compacting {} to remove {:.0}% garbage ({} MB out of {} MB)",
+              s.log.path.display(),
+              status.garbage_percent(),
+              status.garbage_disk_size / 1024 / 1024,
+              status.total_disk_size / 1024 / 1024
+          );
+          s.compact()?;
+          log::info!(
+              "Compacted {} to size {} MB",
+              s.log.path.display(),
+              (status.total_disk_size - status.garbage_disk_size) / 1024 / 1024
+          );
+      }
+
+      Ok(s)
+  }
+
+  /// Returns true if the log file should be compacted.
+  /// 如果日志文件应该被压缩, 就返回 true
+  fn should_compact(
+      garbage_size: u64,
+      total_size: u64,
+      min_fraction: f64,
+      min_bytes: u64,
+  ) -> bool {
+      let garbage_fraction = garbage_size as f64 / total_size as f64;
+      garbage_size > 0 && garbage_size >= min_bytes && garbage_fraction >= min_fraction
+  }
+
+  /// Attempt to flush the file when the database is closed.
+  /// 在 Drop 的时候尝试 flush 文件
+  impl Drop for BitCask {
+    fn drop(&mut self) {
+        if let Err(error) = self.flush() {
+            log::error!("failed to flush file: {}", error)
         }
-
-        Ok(s)
     }
-
-    /// Returns true if the log file should be compacted.
-    /// 如果日志文件应该被压缩, 就返回 true
-    fn should_compact(
-        garbage_size: u64,
-        total_size: u64,
-        min_fraction: f64,
-        min_bytes: u64,
-    ) -> bool {
-        let garbage_fraction = garbage_size as f64 / total_size as f64;
-        garbage_size > 0 && garbage_size >= min_bytes && garbage_fraction >= min_fraction
-    }
+  }
   ```
 ]
 
+上面几个函数比较简单, 下面看一下在压缩的时候会使用的函数 `compact` 以及 `write_log`.
+
+#code("toydb/src/storage/bitcask.rs", "compact / write_log")[
+  ```rust
+  impl BitCask {
+      /// Compacts the current log file by writing out a new log file containing
+      /// only live keys and replacing the current file with it.
+      /// 压缩当前的日志文件, 写出一个新的日志文件, 只包含活跃的 key, 并且用它替换当前的文件
+      pub fn compact(&mut self) -> Result<()> {
+          let mut tmp_path = self.log.path.clone();
+          tmp_path.set_extension("new");
+          let (mut new_log, new_keydir) = self.write_log(tmp_path)?;
+
+          std::fs::rename(&new_log.path, &self.log.path)?;
+          new_log.path = self.log.path.clone();
+
+          self.log = new_log;
+          self.keydir = new_keydir;
+          Ok(())
+      }
+
+      /// Writes out a new log file with the live entries of the current log file
+      /// and returns it along with its keydir. Entries are written in key order.
+      /// 写出一个新的日志文件, 包含当前日志文件中的活跃条目, 并且返回它以及它的 keydir.
+      fn write_log(&mut self, path: PathBuf) -> Result<(Log, KeyDir)> {
+          let mut new_keydir = KeyDir::new();
+          let mut new_log = Log::new(path)?;
+          new_log.file.set_len(0)?; // truncate file if it exists
+          for (key, (value_pos, value_len)) in self.keydir.iter() {
+              let value = self.log.read_value(*value_pos, *value_len)?;
+              let (pos, len) = new_log.write_entry(key, Some(&value))?;
+              new_keydir.insert(key.clone(), (pos + len as u64 - *value_len as u64, *value_len));
+          }
+          Ok((new_log, new_keydir))
+      }
+  }
+  ```
+]
+
+这里也还是比较简单的, `write_log` 函数会遍历keydir, 将活跃的key/value对写入到新的log文件中. `compact` 函数会调用 `write_log` 获取新的log文件, 最后将新的log文件替换掉老的log文件.
+
+
+最后我们看一下 Bitcask 对 `Engine` 这个trait的实现.
+
+#code("", "")[
+  ```rust
+  impl Engine for BitCask {
+      type ScanIterator<'a> = ScanIterator<'a>;
+
+      fn delete(&mut self, key: &[u8]) -> Result<()> {
+          self.log.write_entry(key, None)?;
+          self.keydir.remove(key);
+          Ok(())
+      }
+
+      fn flush(&mut self) -> Result<()> {
+          // Don't fsync in tests, to speed them up. We disable this here, instead
+          // of setting raft::Log::fsync = false in tests, because we want to
+          // assert that the Raft log flushes to disk even if the flush is a noop.
+          #[cfg(not(test))]
+          self.log.file.sync_all()?;
+          Ok(())
+      }
+
+      fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+          if let Some((value_pos, value_len)) = self.keydir.get(key) {
+              Ok(Some(self.log.read_value(*value_pos, *value_len)?))
+          } else {
+              Ok(None)
+          }
+      }
+
+      fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<'_> {
+          ScanIterator { inner: self.keydir.range(range), log: &mut self.log }
+      }
+
+      fn scan_dyn(
+          &mut self,
+          range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
+      ) -> Box<dyn super::ScanIterator + '_> {
+          Box::new(self.scan(range))
+      }
+
+      fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()> {
+          let (pos, len) = self.log.write_entry(key, Some(&*value))?;
+          let value_len = value.len() as u32;
+          self.keydir.insert(key.to_vec(), (pos + len as u64 - value_len as u64, value_len));
+          Ok(())
+      }
+
+      fn status(&mut self) -> Result<Status> {
+          let keys = self.keydir.len() as u64;
+          let size = self
+              .keydir
+              .iter()
+              .fold(0, |size, (key, (_, value_len))| size + key.len() as u64 + *value_len as u64);
+          let total_disk_size = self.log.file.metadata()?.len();
+          // 8 * keys: key 是 u64, 所以是 8 * key的数量
+          let live_disk_size = size + 8 * keys; // account for length prefixes
+          let garbage_disk_size = total_disk_size - live_disk_size;
+          Ok(Status {
+              name: "bitcask".to_string(),
+              keys,
+              size,
+              total_disk_size,
+              live_disk_size,
+              garbage_disk_size,
+          })
+      }
+  }
+  ```
+]
+
+这里可以看得出来, `BitCask` 实现了 `delete`, `flush`, `get`, `scan`, `set`, `status` 这几个方法. 大多数都是调用了 `log` 的方法.
+- `delete` 会将key/value对写入到log文件中, 并且在keydir中删除这个key. 
+- `flush` 会将缓冲区的内容写出到存储介质中. 
+- `get` 会从keydir中获取value的位置以及长度, 然后从log文件中读取value. 
+- `scan` 会返回一个 `ScanIterator`, 用于遍历keydir. 
+- `set` 会将key/value对写入到log文件中, 并且在keydir中插入这个key. 
+- `status` 会返回存储引擎的状态.
 
 
 
@@ -439,8 +566,14 @@ ToyDB使用的可持久化的存储引擎是BitCask(参考@bitcask)的*变种*. 
 
 == ToyDB中的内存存储引擎
 
+TODO: 比较简单, 可以直接看代码.
+
 == MVCC事务
-MVCC#footnote("Multi-Version Concurrency Control: https://zh.wikipedia.org/wiki/多版本并发控制")是一种比较简单的并发控制机制, 他为ACID事务提供快照隔离#footnote("https://jepsen.io/consistency/models/snapshot-isolation"), 从而无须锁就能实现写与读的冲突. 它还可以对所有数据进行版本控制, 允许查询历史的数据.
+MVCC#footnote("Multi-Version Concurrency Control: https://zh.wikipedia.org/wiki/多版本并发控制")是广泛使用的并发控制机制, 他为ACID事务提供快照隔离#footnote("https://jepsen.io/consistency/models/snapshot-isolation"), 能实现读写并发. 快照隔离级别是最高的隔离级别么? 并不是, 最高的隔离级别是可串行化隔离级别, 但是可串行化隔离级别会导致性能问题, 所以快照隔离级别是一个折中的选择.
+
+快照隔离级别会导致写倾斜(Write Skew)问题#footnote("https://justinjaffray.com/what-does-write-skew-look-like/"), 但是这个问题在实际中并不常见. 详细的讨论可以参考@write-skew.
+
+=== MVCC在ToyDB中的实现
 
 ToyDB在存储层实现了MVCC, 可以使用任何实现了`storage::Engine`这个trait的存储引擎. 使用`begin`开始一个新的事务, 这个事务提供常见的kv操作, 比如 `get`, `set`, `delete`等. 事务可以通过`commit`提交(保留更改且对其他事务可见), 也可以通过`rollback`回滚(丢弃修改).
 
@@ -459,10 +592,7 @@ key/value保存为`Key::Version(key, version)`的形式, 其中`key`是用户提
 
 为了实现时间穿梭查询, 只读事务只需加载过去事务的`Key::TxnActiveShapshot`记录就可以了, 可见性规则和普通事务是一样的.
 
-=== MVCC在ToyDB中的实现
-
 === MVCC在ToyDB中的取舍
-+ 只是实现了快照隔离级别, 并没有实现可序列化隔离级别. 会导致写倾斜(write skew)问题#footnote("https://justinjaffray.com/what-does-write-skew-look-like/").
 + 旧的MVCC版本永远不会被删除, 会导致存储空间的浪费. 但是这简化了实现, 也允许完整的数据历史记录.
 + 事务id会在64位后溢出, 没有做处理.
 
