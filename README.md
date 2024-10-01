@@ -9,15 +9,14 @@
 </strong>
 </div>
 
-
 # WIP. 从零开始的分布式数据库生活
 
 # 编译本书
 
 所需组件
 - python(tqdm, requests)
-- typst
-- typstyle
+- [typst](https://typst.app/)
+- [typstyle]()
 
 ```shell
 git clone https://github.com/qujihan/toydb-book.git
@@ -49,3 +48,8 @@ make c
     - [☓] SQL优化
     - [☓] SQL执行
 - [☓] 编码
+
+
+# 广告
+- [typst](https://typst.app/): 最新的排版工具
+- [typst-book-template](https://github.com/qujihan/typst-book-template): typst生成书籍的模板, 本书使用的模板(为了本书专门写的, 后来改造成了一个模板)
