@@ -2,6 +2,7 @@
 <strong>
 <samp>
 
+[![Generate PDF](https://github.com/qujihan/toydb-book/actions/workflows/build.yml/badge.svg)](https://github.com/qujihan/toydb-book/actions/workflows/build.yml)
 [![下载最新版本](https://img.shields.io/badge/%E7%82%B9%E8%BF%99%E9%87%8C-%E4%B8%8B%E8%BD%BDrelease%E7%89%88%E6%9C%AC-red.svg "下载最新版本")](https://nightly.link/qujihan/toydb-book/workflows/build/main/from_zero_to_distributed_database.pdf.zip)
 
 </samp>

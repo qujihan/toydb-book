@@ -544,11 +544,11 @@ ToyDB使用的可持久化的存储引擎是BitCask(参考@bitcask)的*变种*. 
 ]
 
 这里可以看得出来, `BitCask` 实现了 `delete`, `flush`, `get`, `scan`, `set`, `status` 这几个方法. 大多数都是调用了 `log` 的方法.
-- `delete` 会将key/value对写入到log文件中, 并且在keydir中删除这个key. 
-- `flush` 会将缓冲区的内容写出到存储介质中. 
-- `get` 会从keydir中获取value的位置以及长度, 然后从log文件中读取value. 
-- `scan` 会返回一个 `ScanIterator`, 用于遍历keydir. 
-- `set` 会将key/value对写入到log文件中, 并且在keydir中插入这个key. 
+- `delete` 会将key/value对写入到log文件中, 并且在keydir中删除这个key.
+- `flush` 会将缓冲区的内容写出到存储介质中.
+- `get` 会从keydir中获取value的位置以及长度, 然后从log文件中读取value.
+- `scan` 会返回一个 `ScanIterator`, 用于遍历keydir.
+- `set` 会将key/value对写入到log文件中, 并且在keydir中插入这个key.
 - `status` 会返回存储引擎的状态.
 
 
@@ -575,7 +575,84 @@ MVCC#footnote("Multi-Version Concurrency Control: https://zh.wikipedia.org/wiki/
 
 === MVCC在ToyDB中的实现
 
-ToyDB在存储层实现了MVCC, 可以使用任何实现了`storage::Engine`这个trait的存储引擎. 使用`begin`开始一个新的事务, 这个事务提供常见的kv操作, 比如 `get`, `set`, `delete`等. 事务可以通过`commit`提交(保留更改且对其他事务可见), 也可以通过`rollback`回滚(丢弃修改).
+ToyDB在存储层实现了MVCC, 可以使用任何实现了`storage::Engine`存储引擎作为底层存储. 在ToyDB中, 提供了常见的事务操作:
+- `begin`: 开始一个新的事务. (可以是只读事务(read only), 也可以是读写事务)
+- `get`: 读取一个key的值.
+- `set`: 设置一个key的值.
+- `delete`: 删除一个key的值.
+- `scan`: 遍历指定范围的key/value对.
+- `scan_prefix`: 遍历指定前缀的key/value对.
+- `commit`: 提交一个事务. (保留更改, 对其他事务可见)
+- `rollback`: 回滚一个事务. (丢弃更改)
+
+MVCC, 顾名思义, 是通过多个版本来管理事务的. 版本的先后通过 `Version` 来界定, 可以说, `Version` 就是一个逻辑时间戳. 通过 `Version` 用来标记每一个写入的 `Key`, 就可以在一个确定的时刻(`Version` 一定的时刻), 知道一个 `Key` 的值是什么.
+
+```rust
+// x 表示 tombstone 值
+时间(Version)
+5
+4  a4
+3      b3      x
+2
+1  a1      c1  d1
+   a   b   c   d   Key
+```
+
+上面就是一个例子, 在 `Version = 2` 的时候, 可以看到 `a` 的值是 `a1`, `c` 的值是 `c1`, `d` 的值是 `d1`. 在 `Version = 4` 的时候, `a` 的值是 `a4`, `b` 的值是 `b3`, `c` 的值是 `c1`.(没提到就是空值)
+
+理解了 `Version` 这个逻辑时间戳的概念以后, 我们还需要理解 ToyDB中 如何将 `Key` 与 `Version` 结合起来的. 得利于 Rust 强大的类型系统, ToyDB使用了一个叫做 `Key` 的枚举类, 作为事务管理的 `Key`.
+
+这里有必要说一下, 上面一段话中多次提到 `Key`, 但是表示有不同的意思. `Key` 分为存储引擎中的 `Key` 和事务管理中的 `Key`枚举类. 在后续的解读中, 大家需要根据上下文来理解.
+
+事务管理的 `Key` 枚举类的值会通过序列化成存储引擎中的 `Key` 来存储. 这一点对于理解下面MVCC的实现非常重要. 关于序列化的实现, 会在 @encoding 详细说明#footnote("关于序列化也可以阅读一下: " + "https://research.cs.wisc.edu/mist/SoftwareSecurityCourse/Chapters/3_5-Serialization.pdf"), 这里只需要知道实现了 `serde` 的 `Deserialize` 和 `Serialize` 两个 `trait` 就可以通过 `encode()` 将一个对象序列化成 `vec<u8>`, 通过 `decode()` 把 `vec<u8>` 反序列化成一个对象就可以了. 
+
+另外, 通过 `serde` 的 `with = "serde_bytes"` 和 `borrow` 可以将 `Cow` 类型的数据序列化成 `vec<u8>`, 这个在 `Key` 枚举类中会用到.
+
+下面来看一下 `Key` 枚举类的定义.
+
+#code("toydb/src/storage/mvcc.rs", "Key 枚举类")[
+  ```rust
+  /// MVCC keys, using the KeyCode encoding which preserves the ordering and
+  /// grouping of keys. Cow byte slices allow encoding borrowed values and
+  /// decoding into owned values.
+  #[derive(Debug, Deserialize, Serialize)]
+  pub enum Key<'a> {
+      /// The next available version.
+      NextVersion,
+      /// Active (uncommitted) transactions by version.
+      TxnActive(Version),
+      /// A snapshot of the active set at each version. Only written for
+      /// versions where the active set is non-empty (excluding itself).
+      TxnActiveSnapshot(Version),
+      /// Keeps track of all keys written to by an active transaction (identified
+      /// by its version), in case it needs to roll back.
+      TxnWrite(
+          Version,
+          #[serde(with = "serde_bytes")]
+          #[serde(borrow)]
+          Cow<'a, [u8]>,
+      ),
+      /// A versioned key/value pair.
+      Version(
+          #[serde(with = "serde_bytes")]
+          #[serde(borrow)]
+          Cow<'a, [u8]>,
+          Version,
+      ),
+      /// Unversioned non-transactional key/value pairs. These exist separately
+      /// from versioned keys, i.e. the unversioned key "foo" is entirely
+      /// independent of the versioned key "foo@7". These are mostly used
+      /// for metadata.
+      Unversioned(
+          #[serde(with = "serde_bytes")]
+          #[serde(borrow)]
+          Cow<'a, [u8]>,
+      ),
+  }
+  ```
+]
+
+
 
 当事务开始的时候, 从`Key::NextVersion`获取下一个可用的version并且递增它, 然后通过`Key::TxnActive(version)`将自身记录为活动中的事务. 它还会将当前活动的事务做一个快照, 其中包含了事务开始的时候其他所有活动事务的version, 并且将起另存为`Key::TxnActiveSnapshot(id)`.
 

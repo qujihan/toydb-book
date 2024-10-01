@@ -1,4 +1,4 @@
-name: tutorial::ci
+name: Generate PDF
 on: push
 jobs:
   render_pdf:
