@@ -1,12 +1,13 @@
 #import "typst-book-template/book.typ": *
 
 #set text(lang: "zh")
-#set heading(supplement: "")
-#show: book.with(info: (
-  name: "Quhaha",
+#show: book.with(info:(
   title: "从零开始的分布式数据库生活 \n (From Zero to Distributed Database)",
+  name: "Quhaha",
+  outline-depth: 3,
 ))
 
+#set heading(supplement: "")
 #show ref: it => {
   if it.element.func() == heading {
     link(it.target, "第" + it + "章" + it.element.body)
