@@ -40,12 +40,16 @@ make c
 - 存储引擎
     - [√] Bitcask存储引擎
     - [√] MVCC
-- 分布式算法
-    - [☓] Raft
-- SQL
-    - [☓] SQL解析
-    - [☓] SQL优化
-    - [☓] SQL执行
+- 共识算法 Raft
+    - [☓] Message
+    - [☓] Node
+    - [☓] Log
+- SQL引擎
+    - [√] Type
+    - [☓] Engine
+    - [☓] Parse
+    - [☓] Planner
+    - [☓] Execution
 - [☓] 编码
 
 
