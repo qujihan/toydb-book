@@ -6,9 +6,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: typst-community/setup-typst@v3
-      - run: git submodule update --init --recursive
       - name: download typst-book-template
         run: |
+          git submodule update --init --recursive
           pip install requests
           pip install tqdm
           make font
