@@ -104,11 +104,137 @@ AST就是可以被下面的`Planner`所使用的执行计划。
 
 最后执行计划会被`Plan::execution`执行，执行计划的结果会被`ExecutionResult`返回。
 
-当然这里只是简单的说一下功能，具体的链路比现在的还要负责一些。最终会在 @sql_summary 更详细描述脉络。 
+当然这里只是简单的说一下功能，具体的链路比现在的还要复杂一些。最终会在 @sql_summary 更详细描述脉络。
 
 == Type
+
+=== 基本数据类型
+
+现在看一下基本数据类型的定义。
+
+为了简化，这里是支持少量的数据类型，不支持复杂数据类型等。
+
+另外需要说一下，NULL以及NaN都被认为是不等于本事的值，所以`NULL != NULL`，`NaN != NaN`。但是在实际的代码中，NULL和NaN都认为是可以比较且相等的。这是为了对允许对这些值进行排序和处理（比如索引查找、桶聚合等场景）。
+
+
+另外浮点数中的`-0.0 == 0.0`，`-NaN == NaN`都认为返回`true`。存储的时候会将`-0.0`规范化为`0.0`，`-NaN`规范化为`NaN`。
+
+#code("src/sql/types/value.rs", "基本数据类型")[
+  ```rust
+  #[derive(Clone, Debug, Serialize, Deserialize)]
+  pub enum Value {
+      /// 空值
+      Null,
+      /// 布尔类型
+      Boolean(bool),
+      /// 64位有符号整数
+      Integer(i64),
+      /// 64位浮点数
+      Float(f64),
+      /// UTF-8编码的字符串
+      String(String),
+  }
+
+  // 这里定义了 Value 相等的比较
+  impl std::cmp::PartialEq for Value {
+      fn eq(&self, other: &Self) -> bool {
+          match (self, other) {
+              // ...
+              // 这里可以看到上面提到的 NaN == NaN 的情况
+              // 另外
+              // let a: f64 = 0.0;
+              // let b: f64 = -0.0;
+              // println!("{}", a == b); // true
+              (Self::Float(l), Self::Float(r)) => l == r || l.is_nan() && r.is_nan(),
+              // ...
+              (l, r) => core::mem::discriminant(l) == core::mem::discriminant(r),
+          }
+      }
+  }
+
+  impl std::hash::Hash for Value {
+      fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+          core::mem::discriminant(self).hash(state);
+          // Normalize to treat +/-0.0 and +/-NAN as equal when hashing.
+          // 这里调用了 normalize_ref 方法，这个方法会将 -0.0 规范化为 0.0
+          // -NaN 规范化为 NaN
+          match self.normalize_ref().as_ref() {
+              Self::Null => {}
+              Self::Boolean(v) => v.hash(state),
+              Self::Integer(v) => v.hash(state),
+              Self::Float(v) => v.to_bits().hash(state),
+              Self::String(v) => v.hash(state),
+          }
+      }
+  }
+
+  // 这里定义的全序比较, 看一下就好
+  impl Ord for Value {
+      fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+          use std::cmp::Ordering::*;
+          use Value::*;
+          match (self, other) {
+              (Null, Null) => Equal,
+              (Boolean(a), Boolean(b)) => a.cmp(b),
+              (Integer(a), Integer(b)) => a.cmp(b),
+              (Integer(a), Float(b)) => (*a as f64).total_cmp(b),
+              (Float(a), Integer(b)) => a.total_cmp(&(*b as f64)),
+              (Float(a), Float(b)) => a.total_cmp(b),
+              (String(a), String(b)) => a.cmp(b),
+
+              (Null, _) => Less,
+              (_, Null) => Greater,
+              (Boolean(_), _) => Less,
+              (_, Boolean(_)) => Greater,
+              (Float(_), _) => Less,
+              (_, Float(_)) => Greater,
+              (Integer(_), _) => Less,
+              (_, Integer(_)) => Greater,
+              // String is ordered last.
+          }
+      }
+  }
+
+  // 定义了全序比较, 偏序比较直接调用全序比较就可以了
+  impl PartialOrd for Value {
+      fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+          Some(self.cmp(other))
+      }
+  }
+  ```
+
+]
+
+=== Schema
+=== 表达式
+=== 总结
+
 == Engine
+=== SQL引擎的Engine接口
+=== 本地存储的SQL引擎
+=== 基于Raft的分布式SQL引擎
+=== Session
+=== 总结
+
 == Parse
+=== 抽象语法树
+=== 词法解析
+=== 语法解析
+=== 总结
+
 == Planner
+=== Plan结构
+=== 执行计划的生成
+=== 执行计划的优化
+=== 总结
+
 == Execution
+=== 执行器
+=== 扫描操作
+=== 聚合操作
+=== 连接操作
+=== 转换操作
+=== 写操作
+=== 总结
+
 == 总结<sql_summary>
