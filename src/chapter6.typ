@@ -7,14 +7,5 @@
   it
 }
 
-== 一些环境的准备
-
-== BitCask的论文解读 <bitcask>
-=== 参考
-+ https://riak.com/assets/bitcask-intro.pdf
-+ https://arpitbhayani.me/blogs/bitcask/
-
-== 隔离级别
-=== 写倾斜(Write Skew)问题 <write-skew>
-=== 参考
-+ https://justinjaffray.com/what-does-write-skew-look-like/
+#include "chapter6/bitcask.typ"
+#include "chapter6/isolation.typ"
