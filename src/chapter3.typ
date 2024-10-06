@@ -21,7 +21,4 @@
 #include "chapter3/message.typ"
 #include "chapter3/node.typ"
 #include "chapter3/log.typ"
-
-== 其他部分
-
-== 总结
+#include "chapter3/summary.typ"

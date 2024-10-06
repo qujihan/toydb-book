@@ -111,5 +111,5 @@ AST就是可以被下面的`Planner`所使用的执行计划。
 #include "chapter4/parse.typ"
 #include "chapter4/planner.typ"
 #include "chapter4/execution.typ"
+#include "chapter4/summary.typ"
 
-== 总结<sql_summary>

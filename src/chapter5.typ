@@ -7,3 +7,4 @@
 #include "chapter5/keycode.typ"
 #include "chapter5/bincode.typ"
 #include "chapter5/format.typ"
+#include "chapter5/summary.typ"

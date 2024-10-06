@@ -40,5 +40,4 @@ ToyDB是一个分布式数据库，它实现的存储引擎不仅被SQL引擎使
 #include "chapter2/bitcask.typ"
 #include "chapter2/memory.typ"
 #include "chapter2/mvcc.typ"
-
-== 总结
+#include "chapter2/summary.typ"
