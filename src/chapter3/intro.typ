@@ -17,7 +17,7 @@
   ```,
 )
 
-Raft共识算法是一种分布式一致性算法，它的设计目标是提供一种易于理解的一致性算法。Raft算法分为三个部分：领导选举、日志复制和安全性。具体的实现可以参考Raft论文#footnote("Raft Paper: https://raft.github.io/raft.pdf") #footnote("Raft Thesis: https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf") #footnote("Raft 官网: https://raft.github.io")。
+Raft共识算法是一种分布式一致性算法，它的设计目标是提供一种易于理解的一致性算法。Raft算法分为三个部分：领导选举、日志复制和安全性。具体的实现可以参考Raft论文#footnote("Raft Paper：" + link("https://raft.github.io/raft.pdf")) #footnote("Raft Thesis：" + link("https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf")) #footnote("Raft 官网：" + link("https://raft.github.io"))。
 
 Raft有三个特点：
 + 线性一致性（强一致性）：一旦一个数据被Client提交，那么所有的Client都能读到这个数据。（就是永远看不到过时的数据）
