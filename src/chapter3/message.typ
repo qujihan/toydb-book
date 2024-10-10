@@ -3,7 +3,7 @@
 == Raft之Message
 
 
-#code("", "")[
+#code("src/raft/message.rs", "Message 类型")[
   ```rust
   /// 发送者和接收者的消息信封(在Message上包装了一层额外信息).
   #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
