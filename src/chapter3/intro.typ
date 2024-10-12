@@ -1,7 +1,6 @@
 #import "../../typst-book-template/book.typ": *
 #let path-prefix = figure-root-path + "src/pics/"
 
-== Raft介绍
 #code(
   "tree src/raft",
   "Raft算法",
@@ -17,6 +16,7 @@
   ```,
 )
 
+== Raft介绍
 Raft共识算法是一种分布式一致性算法，它的设计目标是提供一种易于理解的一致性算法。Raft算法分为三个部分：领导选举、日志复制和安全性。具体的实现可以参考Raft论文#footnote("Raft Paper：" + link("https://raft.github.io/raft.pdf")) #footnote("Raft Thesis：" + link("https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf")) #footnote("Raft 官网：" + link("https://raft.github.io"))。
 
 Raft有三个特点：
