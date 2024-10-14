@@ -73,13 +73,13 @@
       /// dropped messages. This is typically done by sending probes with a
       /// decrementing base index until a match is found, at which point the
       /// subsequent entries can be sent.
-      /// Leaders 复制日志到 Followers, 通过在给定的 base 条目之后追加到他们的日志中.
+      /// Leaders 复制日志到 Followers, 通过在给定的 base 之后 entry 追加到他们的 log 中.
       Append {
-          /// The index of the log entry to append after.
+          /// 即将添加的 entry 之前的 entry 的 index
           base_index: Index,
-          /// The  term of the base entry.
+          /// 即将添加的 entry 之前的 entry 的 term
           base_term: Term,
-          /// Log entries to append. Must start at base_index + 1.
+          /// 即将被添加的 entry 集合, index 从 base_index + 1 开始
           entries: Vec<Entry>,
       },
 
