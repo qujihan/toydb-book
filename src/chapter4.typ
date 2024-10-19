@@ -47,7 +47,13 @@
 
 #code("src/sql/types/mod.rs", "types对外暴露的接口")[
   ```rust
-  /// .....
+  // src/sql
+  // ├── ...
+  // └── types
+  //     ├── expression.rs # 定义了SQL的表达式.
+  //     ├── mod.rs
+  //     ├── schema.rs # 定义了SQL的表结构以及列结构.
+  //     └── value.rs # 定义了SQL的基本数据类型以及数据类型枚举.
   pub use expression::Expression;
   pub use schema::{Column, Table};
   pub use value::{DataType, Label, Row, Rows, Value};
@@ -58,7 +64,14 @@
 
 #code("src/sql/engine/mod.rs", "engine对外暴露的接口")[
   ```rust
-  /// .....
+  // src/sql
+  // ├── ...
+  // └── engine
+  //     ├── engine.rs # 定义了SQL引擎的接口.
+  //     ├── local.rs # 本地存储的SQL引擎.
+  //     ├── mod.rs
+  //     ├── raft.rs # 基于Raft的分布式SQL引擎.
+  //     └── session.rs # 执行SQL语句, 并处理事务控制.
   pub use engine::{Catalog, Engine, Transaction};
   pub use local::{Key, Local};
   pub use raft::{Raft, Status, Write};
@@ -72,7 +85,13 @@
 
 #code("src/sql/parse/mod.rs", "parse对外暴露的接口")[
   ```rust
-  /// .....
+  // src/sql
+  // ├── ...
+  // └── parser
+  //     ├── ast.rs # 定义了SQL的抽象语法树(ast)的结构.
+  //     ├── lexer.rs # SQL的词法分析器, 将SQL语句转换为Token.
+  //     ├── mod.rs
+  //     └── parser.rs # SQL的语法分析器, 将Token转换为AST.
   pub use lexer::{is_ident, Keyword, Lexer, Token};
   pub use parser::Parser;
   ```
@@ -84,7 +103,13 @@ AST就是可以被下面的`Planner`所使用的执行计划。
 
 #code("src/sql/planner/mod.rs", "planner对外暴露的接口")[
   ```rust
-  /// .....
+  // src/sql
+  // ├── ...
+  // └── planner
+  //     ├── mod.rs
+  //     ├── optimizer.rs # 执行计划的优化器.
+  //     ├── plan.rs # 执行计划的结构与操作.
+  //     └── planner.rs # SQL解析以及执行计划的生成.
   pub use plan::{Aggregate, Direction, Node, Plan};
   pub use planner::{Planner, Scope};
 
@@ -97,7 +122,16 @@ AST就是可以被下面的`Planner`所使用的执行计划。
 
 #code("src/sql/execution/mod.rs", "execution对外暴露的接口")[
   ```rust
-  /// .....
+  // src/sql
+  // │── ...
+  // └── execution
+  //     ├── aggregate.rs # SQL的聚合操作, 如GROUP BY, COUNT等.
+  //     ├── execute.rs # 执行计划的执行器.
+  //     ├── join.rs # SQL的连接操作, 如JOIN, LEFT JOIN等.
+  //     ├── mod.rs
+  //     ├── source.rs # 负责提供数据源, 如表扫描, 主键扫描, 索引扫描等.
+  //     ├── transform.rs # SQL的转换操作, 如投影, 过滤, 限制, 排序等.
+  //     └── write.rs # SQL的写操作, 如INSERT, DELETE, UPDATE等.
   pub use execute::{execute_plan, ExecutionResult};
   ```
 ]

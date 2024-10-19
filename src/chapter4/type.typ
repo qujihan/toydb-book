@@ -9,7 +9,7 @@
 
 为了简化，这里是支持少量的数据类型，不支持复杂数据类型等。
 
-另外需要说一下，NULL以及NaN都被认为是不等于本事的值，所以`NULL != NULL`，`NaN != NaN`。但是在实际的代码中，NULL和NaN都认为是可以比较且相等的。这是为了对允许对这些值进行排序和处理（比如索引查找、桶聚合等场景）。
+另外需要说一下，NULL以及NaN都被认为是不等于本身的值，所以理论上`NULL != NULL`，`NaN != NaN`。但是在实际的代码中，NULL和NaN都认为是可以比较且相等的。这是为了对允许对这些值进行排序和处理（比如索引查找、桶聚合等场景）。
 
 
 另外浮点数中的`-0.0 == 0.0`，`-NaN == NaN`都认为返回`true`。存储的时候会将`-0.0`规范化为`0.0`，`-NaN`规范化为`NaN`。
@@ -19,29 +19,20 @@
   /// 支持的数据类型
   #[derive(Clone, Copy, Debug, Hash, PartialEq, Serialize, Deserialize)]
   pub enum DataType {
-      /// 布尔类型
-      Boolean,
-      /// 64位有符号整数
-      Integer,
-      /// 64位浮点数
-      Float,
-      /// UTF-8编码的字符串
-      String,
+      Boolean, // 布尔类型
+      Integer, // 64位有符号整数
+      Float,   // 64位浮点数
+      String,  // UTF-8编码的字符串
   }
 
   /// 数据的值
   #[derive(Clone, Debug, Serialize, Deserialize)]
   pub enum Value {
-      /// 空值
-      Null,
-      /// 布尔类型
-      Boolean(bool),
-      /// 64位有符号整数
-      Integer(i64),
-      /// 64位浮点数
-      Float(f64),
-      /// UTF-8编码的字符串
-      String(String),
+      Null,           // 空值
+      Boolean(bool),  // 布尔类型
+      Integer(i64),   // 64位有符号整数
+      Float(f64),     // 64位浮点数
+      String(String), // UTF-8编码的字符串
   }
 
   // 这里定义了 Value 相等的比较
@@ -55,7 +46,7 @@
               // let b: f64 = -0.0;
               // println!("{}", a == b); // true
               (Self::Float(l), Self::Float(r)) => l == r || l.is_nan() && r.is_nan(),
-              // ...
+              // ..省略大部分简单代码..
               (l, r) => core::mem::discriminant(l) == core::mem::discriminant(r),
           }
       }
@@ -104,7 +95,7 @@
       }
   }
 
-  // 定义了全序比较, 偏序比较直接调用全序比较就可以了
+  // 这里是实现偏序比较, 在定义了全序比较以后, 偏序比较直接调用全序比较就可以了
   impl PartialOrd for Value {
       fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
           Some(self.cmp(other))
@@ -131,7 +122,7 @@
       /// 减法操作
       pub fn checked_sub(&self, other: &Self) -> Result<Self> { ...  }
       /// 返回数据类型
-      /// 这里可以看到Rust的表达能力真的很强
+      /// 这里可以看到Rust的表达能力挺强的
       pub fn datatype(&self) -> Option<DataType> {
           match self {
               Self::Null => None,
