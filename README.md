@@ -13,26 +13,15 @@
 # 编译本书
 
 所需组件
-- python(tqdm, requests)
-- [typst](https://typst.app/)
-- [typstyle]()
+- Python
+- [Typst](https://typst.app/)
 
 ```shell
 git clone https://github.com/qujihan/toydb-book.git
-
-# 下载依赖
-cd toydb-book && git submodule update --init --recursive
-
-pip install requests # 下载字体使用
-pip install tqdm # 为了下载界面好看一点
-
-# 下载所需字体
-# 与 python3 ./typst-book-template/fonts/download.py --proxy 相同
-make font 
-
-# 编译
-# 与 python3 ./typst-book-template/op.py c 相同
-make c 
+cd toydb-book
+git submodule update --init --recursive
+python fonts/download.py
+make c
 ```
 
 ## TODO
@@ -51,8 +40,3 @@ make c
     - [☓] Planner
     - [☓] Execution
 - [☓] 编码
-
-
-# 一些推广
-- [typst](https://typst.app/): 全新的排版工具
-- [typst-book-template](https://github.com/qujihan/typst-book-template): typst生成书籍的模板, 本书使用的模板(为了本书专门写的, 后来改造成了一个模板)
