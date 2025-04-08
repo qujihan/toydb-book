@@ -1,0 +1,40 @@
+name: Push output to output branch
+
+on: 
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push-to-output-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: typst-community/setup-typst@v3
+      - name: Run make
+        run: |
+          make fonts
+          make build
+
+      - name: Checkout output branch
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "<>"
+          git checkout --orphan output
+          git rm -r --cached .
+          cp output/*.pdf .
+          git add -f *.pdf
+          git commit -m "Update output files"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: output
+          force: true

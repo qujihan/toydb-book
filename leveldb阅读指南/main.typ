@@ -1,0 +1,6 @@
+#include "src/intro.typ"
+#include "src/format.typ"
+#include "src/workflows.typ"
+#include "src/utils.typ"
+#include "src/appendix.typ"
+#include "src/reference.typ"
