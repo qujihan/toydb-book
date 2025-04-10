@@ -33,4 +33,4 @@ lora_zip_file="lora.zip"
 curl -Lo ${lora_zip_file} https://github.com/cyrealtype/Lora-Cyrillic/releases/download/v${lora_version}/Lora-v${lora_version}.zip &&
     unzip ${lora_zip_file} -d ${font_dir}
 
-typst fonts
+typst fonts --variants
