@@ -1,0 +1,5 @@
+{
+    "tinymist.previewFeature": "enable",
+    "tinymist.outputPath": "${fileWorkspaceFolder}/example.pdf",
+    "tinymist.rootPath": "${fileWorkspaceFolder}",
+}

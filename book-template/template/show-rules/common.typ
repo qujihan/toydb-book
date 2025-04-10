@@ -12,9 +12,9 @@
   set par(
     first-line-indent: (amount: 2em, all: true),
     justify: true,
-    leading: 0.8em,
+    leading: 1em,
     linebreaks: "optimized",
-    spacing: 1.5em,
+    spacing: 1.3em,
   )
 
   body
